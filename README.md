@@ -1,3 +1,6 @@
+
+<img width="1199" height="349" alt="SLIME logo 2" src="https://github.com/user-attachments/assets/7506c817-69df-400c-8180-cb8e16e75a10" />
+
 # SLIME Enterprise
 
 **Sealed Law-layer Execution Environment — Enterprise Appliance**
