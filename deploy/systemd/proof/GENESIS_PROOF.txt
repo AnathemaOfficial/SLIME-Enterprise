@@ -1,0 +1,92 @@
+SLIME v0 — systemd boot proof (syf-node)
+UTC: 2026-02-23
+
+SERVICES
+- actuator.service: active (running), ExecStartPre rm -f /run/slime/egress.sock
+- slime.service:    active (running), ExecStartPre wait-loop for /run/slime/egress.sock
+
+SOCKET PERMS
+/run/slime           actuator:slime-actuator 0770
+/run/slime/egress.sock actuator:slime-actuator 0660
+
+EGRESS TEST
+- POST /action -> actuator log: egress bytes=32
+
+NOTES
+- WorkingDirectory set for slime-runner (drop-in override)
+- stdout/stderr journal enabled (drop-in override)
+
+=== systemctl status actuator ===
+● actuator.service - SLIME External Actuator
+     Loaded: loaded (/etc/systemd/system/actuator.service; enabled; preset: enabled)
+    Drop-In: /etc/systemd/system/actuator.service.d
+             └─override.conf
+     Active: active (running) since Mon 2026-02-23 18:36:07 UTC; 3min 54s ago
+    Process: 1015 ExecStartPre=/bin/sh -lc rm -f /run/slime/egress.sock (code=exited, status=0/SUCCESS)
+   Main PID: 1049 (python3)
+      Tasks: 1 (limit: 28578)
+     Memory: 4.9M (peak: 5.1M)
+        CPU: 47ms
+     CGroup: /system.slice/actuator.service
+             └─1049 python3 /usr/local/bin/actuator-binary
+
+Feb 23 18:36:07 syf-node systemd[1]: Starting actuator.service - SLIME External Actuator...
+Feb 23 18:36:07 syf-node systemd[1]: Started actuator.service - SLIME External Actuator.
+Feb 23 18:37:49 syf-node actuator-binary[1049]: egress bytes=32
+
+=== systemctl status slime ===
+● slime.service - SLIME Runner
+     Loaded: loaded (/etc/systemd/system/slime.service; enabled; preset: enabled)
+    Drop-In: /etc/systemd/system/slime.service.d
+             └─override.conf
+     Active: active (running) since Mon 2026-02-23 18:36:07 UTC; 3min 54s ago
+    Process: 1054 ExecStartPre=/bin/sh -lc for i in $(seq 1 50); do test -S /run/slime/egress.sock && exit 0; sleep 0.1; done; exit 1 (code=exited, status=0/SUCCESS)
+   Main PID: 1121 (slime-runner)
+      Tasks: 2 (limit: 28578)
+     Memory: 972.0K (peak: 1.5M)
+        CPU: 30ms
+     CGroup: /system.slice/slime.service
+             └─1121 /usr/local/bin/slime-runner
+
+Feb 23 18:36:07 syf-node systemd[1]: Starting slime.service - SLIME Runner...
+Feb 23 18:36:07 syf-node systemd[1]: Started slime.service - SLIME Runner.
+
+=== stat socket ===
+actuator slime-actuator 770 /run/slime
+actuator slime-actuator 660 /run/slime/egress.sock
+
+=== last actuator logs ===
+Feb 23 18:18:35 syf-node actuator-binary[22649]: egress bytes=0
+Feb 23 18:18:38 syf-node actuator-binary[22649]: egress bytes=0
+Feb 23 18:25:12 syf-node actuator-binary[22649]: egress bytes=32
+Feb 23 18:27:38 syf-node systemd[1]: Stopping actuator.service - SLIME External Actuator...
+Feb 23 18:27:38 syf-node systemd[1]: actuator.service: Deactivated successfully.
+Feb 23 18:27:38 syf-node systemd[1]: Stopped actuator.service - SLIME External Actuator.
+Feb 23 18:27:38 syf-node systemd[1]: Starting actuator.service - SLIME External Actuator...
+Feb 23 18:27:38 syf-node systemd[1]: Started actuator.service - SLIME External Actuator.
+Feb 23 18:29:20 syf-node systemd[1]: Stopping actuator.service - SLIME External Actuator...
+Feb 23 18:29:20 syf-node systemd[1]: actuator.service: Deactivated successfully.
+Feb 23 18:29:20 syf-node systemd[1]: Stopped actuator.service - SLIME External Actuator.
+-- Boot 236364179e5b4be8987d1b1823a69bf5 --
+Feb 23 18:29:41 syf-node systemd[1]: Starting actuator.service - SLIME External Actuator...
+Feb 23 18:29:41 syf-node systemd[1]: Started actuator.service - SLIME External Actuator.
+Feb 23 18:33:00 syf-node actuator-binary[1054]: egress bytes=32
+Feb 23 18:35:47 syf-node systemd[1]: Stopping actuator.service - SLIME External Actuator...
+Feb 23 18:35:47 syf-node systemd[1]: actuator.service: Deactivated successfully.
+Feb 23 18:35:47 syf-node systemd[1]: Stopped actuator.service - SLIME External Actuator.
+-- Boot 98841189480a4bc8b6bd04a9908071fd --
+Feb 23 18:36:07 syf-node systemd[1]: Starting actuator.service - SLIME External Actuator...
+Feb 23 18:36:07 syf-node systemd[1]: Started actuator.service - SLIME External Actuator.
+Feb 23 18:37:49 syf-node actuator-binary[1049]: egress bytes=32
+
+=== curl action test ===
+curl -sS -X POST http://127.0.0.1:8080/action -H 'Content-Type: application/json' -d '{"domain":"test","magnitude":10,"payload":""}'
+
+=== curl action result ===
+exit=0
+body=
+
+=== actuator logs (current boot, last 20) ===
+Feb 23 18:36:07 syf-node systemd[1]: Starting actuator.service - SLIME External Actuator...
+Feb 23 18:36:07 syf-node systemd[1]: Started actuator.service - SLIME External Actuator.
+Feb 23 18:37:49 syf-node actuator-binary[1049]: egress bytes=32

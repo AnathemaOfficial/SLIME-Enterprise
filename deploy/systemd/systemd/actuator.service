@@ -1,0 +1,15 @@
+[Unit]
+Description=SLIME External Actuator
+After=network.target
+
+[Service]
+Type=simple
+User=actuator
+Group=slime-actuator
+ExecStart=/opt/slime/bin/actuator-binary
+Restart=no
+RuntimeDirectory=slime
+RuntimeDirectoryMode=0770
+
+[Install]
+WantedBy=multi-user.target

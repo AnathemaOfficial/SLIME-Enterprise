@@ -1,0 +1,18 @@
+[Unit]
+Description=SLIME runner — fail-closed membrane
+After=network.target actuator.service
+Requires=actuator.service
+
+[Service]
+Type=simple
+User=slime
+Group=slime-actuator
+ExecStartPre=/bin/sh -c 'for i in $(seq 1 50); do test -S /run/slime/egress.sock && exit 0; sleep 0.1; done; exit 1'
+ExecStart=/usr/local/bin/slime-runner
+Restart=no
+NoNewPrivileges=yes
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

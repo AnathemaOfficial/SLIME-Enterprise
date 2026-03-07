@@ -1,0 +1,12 @@
+[T01] invalid JSON
+code=200
+[T01] events_before=411 events_after=411
+[T02] missing required fields (magnitude missing)
+code=200
+[T02] events_before=411 events_after=411
+[T03] wrong types
+code=200
+code=200
+[T03] events_before=411 events_after=411
+[T05] flood 200 requests
+[T05] events_before=411 events_after=611 (delta=200)

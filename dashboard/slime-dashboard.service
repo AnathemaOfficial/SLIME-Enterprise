@@ -1,0 +1,27 @@
+[Unit]
+Description=SLIME Dashboard (read-only observation) — noncanon/enterprise
+After=network.target actuator.service
+Wants=actuator.service
+
+[Service]
+Type=simple
+User=fireplank
+Group=slime-actuator
+ExecStart=/usr/bin/python3 /home/fireplank/slime-dashboard/server.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+ReadOnlyPaths=/var/log/slime-actuator /usr/lib/slime
+
+[Install]
+WantedBy=multi-user.target

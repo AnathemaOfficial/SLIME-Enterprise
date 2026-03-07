@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SLIME Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            line-height: 1.5;
+            min-height: 100vh;
+        }
+
+        .container { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
+
+        /* ---- Header ---- */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #21262d;
+            margin-bottom: 24px;
+        }
+        .header h1 { font-size: 1.6rem; color: #f0f6fc; letter-spacing: 0.5px; }
+        .header .subtitle { color: #8b949e; font-size: 0.85rem; margin-top: 2px; }
+        .seal-badge {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 14px; border-radius: 20px; font-size: 0.8rem;
+            font-weight: 600; letter-spacing: 0.3px;
+        }
+        .seal-ok { background: #0d2818; color: #3fb950; border: 1px solid #238636; }
+        .seal-fail { background: #3d1114; color: #f85149; border: 1px solid #da3633; }
+
+        /* ---- Status cards row ---- */
+        .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 24px; }
+        .card {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        .card-title {
+            font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px;
+            color: #8b949e; margin-bottom: 12px;
+        }
+        .card-status {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 1.3rem; font-weight: 700;
+        }
+        .dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .dot-green { background: #3fb950; box-shadow: 0 0 8px #3fb95066; }
+        .dot-red { background: #f85149; box-shadow: 0 0 8px #f8514966; }
+        .dot-amber { background: #d29922; box-shadow: 0 0 8px #d2992266; }
+        .card-meta { color: #8b949e; font-size: 0.8rem; margin-top: 8px; }
+
+        /* ---- Counters ---- */
+        .counters {
+            display: flex; gap: 16px; margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+        .counter-box {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 8px;
+            padding: 16px 24px;
+            text-align: center;
+            flex: 1;
+            min-width: 120px;
+        }
+        .counter-value {
+            font-size: 1.8rem; font-weight: 700; color: #f0f6fc;
+            font-variant-numeric: tabular-nums;
+        }
+        .counter-label {
+            font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px;
+            color: #8b949e; margin-top: 4px;
+        }
+
+        /* ---- Events table ---- */
+        .events-section {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .events-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 16px 20px;
+            border-bottom: 1px solid #21262d;
+        }
+        .events-title { font-size: 0.85rem; font-weight: 600; color: #f0f6fc; }
+        .events-count { font-size: 0.8rem; color: #8b949e; }
+
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            text-align: left; padding: 10px 20px;
+            font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.5px;
+            color: #8b949e; border-bottom: 1px solid #21262d;
+            background: #0d1117;
+        }
+        td {
+            padding: 10px 20px; font-size: 0.85rem;
+            border-bottom: 1px solid #21262d;
+            font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+        }
+        tr:hover td { background: #1c2128; }
+        .domain-test { color: #79c0ff; }
+        .domain-payment { color: #d2a8ff; }
+        .domain-deploy { color: #ffa657; }
+        .domain-db_prod { color: #ff7b72; }
+        .domain-unknown { color: #8b949e; }
+        .token-preview { color: #484f58; font-size: 0.75rem; }
+        .magnitude-val { color: #3fb950; }
+
+        .empty-state {
+            padding: 40px 20px;
+            text-align: center;
+            color: #484f58;
+            font-size: 0.9rem;
+        }
+
+        /* ---- Footer ---- */
+        .footer {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-top: 24px; padding-top: 16px;
+            border-top: 1px solid #21262d;
+            color: #484f58; font-size: 0.75rem;
+        }
+        .footer .read-only {
+            background: #1c1e24; padding: 4px 10px;
+            border-radius: 4px; border: 1px solid #30363d;
+            color: #8b949e;
+        }
+
+        /* ---- Responsive ---- */
+        @media (max-width: 768px) {
+            .cards { grid-template-columns: 1fr; }
+            .counters { flex-direction: column; }
+            td, th { padding: 8px 12px; font-size: 0.78rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <!-- Header -->
+        <div class="header">
+            <div>
+                <h1>SLIME Dashboard</h1>
+                <div class="subtitle">Sealed Law-layer Execution Environment &mdash; Phase 6</div>
+            </div>
+            <div id="seal-badge" class="seal-badge seal-fail">FP-1: checking...</div>
+        </div>
+
+        <!-- Service status cards -->
+        <div class="cards">
+            <div class="card">
+                <div class="card-title">slime.service</div>
+                <div class="card-status">
+                    <span id="slime-dot" class="dot dot-amber"></span>
+                    <span id="slime-status">--</span>
+                </div>
+                <div class="card-meta" id="slime-meta"></div>
+            </div>
+            <div class="card">
+                <div class="card-title">actuator.service</div>
+                <div class="card-status">
+                    <span id="actuator-dot" class="dot dot-amber"></span>
+                    <span id="actuator-status">--</span>
+                </div>
+                <div class="card-meta" id="actuator-meta"></div>
+            </div>
+            <div class="card">
+                <div class="card-title">runner health</div>
+                <div class="card-status">
+                    <span id="runner-dot" class="dot dot-amber"></span>
+                    <span id="runner-status">--</span>
+                </div>
+                <div class="card-meta" id="runner-meta"></div>
+            </div>
+        </div>
+
+        <!-- Counters -->
+        <div class="counters" id="counters">
+            <div class="counter-box">
+                <div class="counter-value" id="total-count">--</div>
+                <div class="counter-label">Total Events</div>
+            </div>
+        </div>
+
+        <!-- Events table -->
+        <div class="events-section">
+            <div class="events-header">
+                <span class="events-title">Recent Authorized Actions</span>
+                <span class="events-count" id="events-showing"></span>
+            </div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Domain</th>
+                        <th>Magnitude</th>
+                        <th>Token</th>
+                    </tr>
+                </thead>
+                <tbody id="events-body">
+                    <tr><td colspan="3" class="empty-state">Loading...</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <span>Last update: <span id="last-update">--</span></span>
+            <span class="read-only">Read-only observation &mdash; no controls</span>
+            <span>&copy; SYFCORP &mdash; noncanon/enterprise</span>
+        </div>
+
+    </div>
+
+    <script>
+    const POLL_MS = 2000;
+    const HEALTH_EVERY = 5; // health check every 5 poll cycles (10s)
+    let healthTick = 0;
+
+    // ---- Fetch helpers ----
+
+    async function fetchJSON(url) {
+        const r = await fetch(url);
+        return r.json();
+    }
+
+    // ---- Render: services ----
+
+    function renderService(prefix, svc) {
+        const dot = document.getElementById(prefix + '-dot');
+        const status = document.getElementById(prefix + '-status');
+        const meta = document.getElementById(prefix + '-meta');
+
+        const isActive = svc.active === 'active';
+        dot.className = 'dot ' + (isActive ? 'dot-green' : 'dot-red');
+        status.textContent = svc.active.toUpperCase();
+
+        let info = [];
+        if (svc.pid && svc.pid !== '0') info.push('PID ' + svc.pid);
+        if (svc.since) info.push('since ' + svc.since);
+        meta.textContent = info.join(' · ');
+    }
+
+    // ---- Render: seal ----
+
+    function renderSeal(seal) {
+        const badge = document.getElementById('seal-badge');
+        if (seal.present) {
+            badge.className = 'seal-badge seal-ok';
+            badge.textContent = 'FP-1: OK';
+            badge.title = 'Runner: ' + seal.runner_hash + '\nActuator: ' + seal.actuator_hash;
+        } else {
+            badge.className = 'seal-badge seal-fail';
+            badge.textContent = 'FP-1: MISSING';
+            badge.title = 'Seal file not found';
+        }
+    }
+
+    // ---- Render: runner health ----
+
+    function renderHealth(runner) {
+        const dot = document.getElementById('runner-dot');
+        const status = document.getElementById('runner-status');
+        const meta = document.getElementById('runner-meta');
+
+        if (runner.reachable) {
+            dot.className = 'dot dot-green';
+            status.textContent = 'OK';
+            meta.textContent = runner.status;
+        } else {
+            dot.className = 'dot dot-red';
+            status.textContent = 'UNREACHABLE';
+            meta.textContent = runner.error || '';
+        }
+    }
+
+    // ---- Render: counters ----
+
+    const DOMAIN_COLORS = {
+        test: 'domain-test',
+        payment: 'domain-payment',
+        deploy: 'domain-deploy',
+        db_prod: 'domain-db_prod',
+    };
+
+    function renderCounters(total, byDomain) {
+        document.getElementById('total-count').textContent = total.toLocaleString();
+
+        const container = document.getElementById('counters');
+        // Keep the total box, rebuild domain boxes
+        const boxes = container.querySelectorAll('.domain-counter');
+        boxes.forEach(b => b.remove());
+
+        const domains = Object.entries(byDomain).sort((a, b) => b[1] - a[1]);
+        for (const [name, count] of domains) {
+            const box = document.createElement('div');
+            box.className = 'counter-box domain-counter';
+            const colorClass = DOMAIN_COLORS[name] || 'domain-unknown';
+            box.innerHTML = `
+                <div class="counter-value ${colorClass}">${count.toLocaleString()}</div>
+                <div class="counter-label">${escapeHtml(name)}</div>
+            `;
+            container.appendChild(box);
+        }
+    }
+
+    // ---- Render: events ----
+
+    function renderEvents(events, total) {
+        const tbody = document.getElementById('events-body');
+        const showing = document.getElementById('events-showing');
+
+        if (!events.length) {
+            tbody.innerHTML = '<tr><td colspan="3" class="empty-state">No events recorded</td></tr>';
+            showing.textContent = '';
+            return;
+        }
+
+        showing.textContent = `showing ${events.length} of ${total.toLocaleString()}`;
+
+        let html = '';
+        for (const e of events) {
+            const colorClass = DOMAIN_COLORS[e.domain] || 'domain-unknown';
+            const tokenShort = e.token.substring(0, 16) + '...';
+            html += `<tr>
+                <td class="${colorClass}">${escapeHtml(e.domain)}</td>
+                <td class="magnitude-val">${e.magnitude.toLocaleString()}</td>
+                <td class="token-preview">${tokenShort}</td>
+            </tr>`;
+        }
+        tbody.innerHTML = html;
+    }
+
+    // ---- Utility ----
+
+    function escapeHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = s;
+        return d.innerHTML;
+    }
+
+    function updateTimestamp() {
+        document.getElementById('last-update').textContent =
+            new Date().toLocaleTimeString();
+    }
+
+    // ---- Polling ----
+
+    async function pollEvents() {
+        try {
+            const data = await fetchJSON('/api/events');
+            renderEvents(data.events, data.total);
+            renderCounters(data.total, data.by_domain);
+        } catch (e) {
+            console.error('events poll failed:', e);
+        }
+    }
+
+    async function pollStatus() {
+        try {
+            const data = await fetchJSON('/api/status');
+            renderService('slime', data.services.slime);
+            renderService('actuator', data.services.actuator);
+            renderSeal(data.seal);
+        } catch (e) {
+            console.error('status poll failed:', e);
+        }
+    }
+
+    async function pollHealth() {
+        try {
+            const data = await fetchJSON('/api/health');
+            renderHealth(data.runner);
+        } catch (e) {
+            console.error('health poll failed:', e);
+        }
+    }
+
+    async function poll() {
+        pollEvents();
+        pollStatus();
+        healthTick++;
+        if (healthTick % HEALTH_EVERY === 0) {
+            pollHealth();
+        }
+        updateTimestamp();
+    }
+
+    // Initial load
+    poll();
+    pollHealth(); // first load always checks health
+    setInterval(poll, POLL_MS);
+    </script>
+</body>
+</html>
