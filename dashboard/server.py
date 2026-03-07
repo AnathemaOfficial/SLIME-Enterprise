@@ -8,7 +8,7 @@ Serves a web dashboard on port 8081 showing:
   - systemd service status (slime.service, actuator.service)
   - FP-1 seal file integrity status
   - Runner health check (non-invasive IMPOSSIBLE probe)
-  - AI Analyst endpoint (Claude API, read-only decision interpreter)
+  - AI Analyst endpoint (multi-provider LLM, read-only decision interpreter)
 
 No feedback into SLIME execution. Read-only by construction.
 """
@@ -25,13 +25,23 @@ import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
-# AI Analyst dependency (graceful degradation if absent)
+import urllib.request
+import urllib.error
+
+# AI Analyst dependencies (graceful degradation if absent)
 try:
     import anthropic
     _HAS_ANTHROPIC = True
 except ImportError:
     anthropic = None
     _HAS_ANTHROPIC = False
+
+try:
+    import openai
+    _HAS_OPENAI = True
+except ImportError:
+    openai = None
+    _HAS_OPENAI = False
 
 import analyst_context
 
@@ -59,10 +69,31 @@ DOMAIN_TABLE = {0: "test", 1: "payment", 2: "deploy", 3: "db_prod"}
 DASHBOARD_HTML = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dashboard.html")
 
 # ---------------------------------------------------------------------------
-# AI Analyst configuration
+# AI Analyst configuration — Multi-provider LLM
 # ---------------------------------------------------------------------------
+#
+# Supported providers (set via ANALYST_PROVIDER env var):
+#   anthropic  — Claude API     (requires: pip install anthropic)
+#   openai     — OpenAI GPT API (requires: pip install openai)
+#   kimi       — Moonshot Kimi  (requires: pip install openai)
+#   ollama     — Local Ollama   (requires: ollama running, no pip dependency)
+#
+# Environment variables per provider:
+#   anthropic: ANTHROPIC_API_KEY, ANTHROPIC_MODEL (default: claude-sonnet-4-20250514)
+#   openai:    OPENAI_API_KEY,    OPENAI_MODEL    (default: gpt-4o)
+#   kimi:      KIMI_API_KEY,      KIMI_MODEL      (default: moonshot-v1-8k)
+#   ollama:    OLLAMA_HOST,       OLLAMA_MODEL    (default: qwen2.5:14b)
+#
 
-ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+ANALYST_PROVIDER = os.environ.get("ANALYST_PROVIDER", "ollama")
+
+PROVIDER_DEFAULTS = {
+    "anthropic": {"model": "claude-sonnet-4-20250514"},
+    "openai":    {"model": "gpt-4o"},
+    "kimi":      {"model": "moonshot-v1-8k", "base_url": "https://api.moonshot.cn/v1"},
+    "ollama":    {"model": "qwen2.5:14b", "host": "http://localhost:11434"},
+}
+
 CHAT_MAX_TOKENS = 1024
 CHAT_RATE_LIMIT_SECONDS = 2
 CHAT_MAX_BODY_BYTES = 4096
@@ -98,6 +129,99 @@ Base your analysis strictly on these two blocks. Do not invent data.\
 # Rate limiter state (thread-safe)
 _chat_rate_lock = threading.Lock()
 _chat_last_request: dict[str, float] = {}
+
+
+# ---------------------------------------------------------------------------
+# LLM Provider Abstraction
+# ---------------------------------------------------------------------------
+
+def _get_analyst_model() -> str:
+    """Return the model name for the active provider."""
+    provider = ANALYST_PROVIDER
+    env_key = f"{provider.upper()}_MODEL"
+    return os.environ.get(env_key, PROVIDER_DEFAULTS.get(provider, {}).get("model", ""))
+
+
+def _analyst_available() -> tuple[bool, str]:
+    """Check if the analyst is available. Returns (available, reason)."""
+    provider = ANALYST_PROVIDER
+    if provider == "anthropic":
+        if not _HAS_ANTHROPIC:
+            return False, "anthropic package not installed"
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            return False, "missing ANTHROPIC_API_KEY"
+    elif provider == "openai":
+        if not _HAS_OPENAI:
+            return False, "openai package not installed"
+        if not os.environ.get("OPENAI_API_KEY"):
+            return False, "missing OPENAI_API_KEY"
+    elif provider == "kimi":
+        if not _HAS_OPENAI:
+            return False, "openai package not installed (required for Kimi)"
+        if not os.environ.get("KIMI_API_KEY"):
+            return False, "missing KIMI_API_KEY"
+    elif provider == "ollama":
+        pass  # No dependency check — uses urllib (stdlib)
+    else:
+        return False, f"unknown provider: {provider}"
+    return True, "ok"
+
+
+def _call_llm(system_prompt: str, user_content: str) -> str:
+    """Call the configured LLM provider and return the response text.
+
+    Raises Exception on failure (caller handles error response).
+    """
+    provider = ANALYST_PROVIDER
+    model = _get_analyst_model()
+
+    if provider == "anthropic":
+        client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        response = client.messages.create(
+            model=model,
+            max_tokens=CHAT_MAX_TOKENS,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_content}],
+        )
+        return response.content[0].text
+
+    elif provider in ("openai", "kimi"):
+        kwargs = {"api_key": os.environ.get("OPENAI_API_KEY")}
+        if provider == "kimi":
+            kwargs["api_key"] = os.environ["KIMI_API_KEY"]
+            kwargs["base_url"] = PROVIDER_DEFAULTS["kimi"]["base_url"]
+        client = openai.OpenAI(**kwargs)
+        response = client.chat.completions.create(
+            model=model,
+            max_tokens=CHAT_MAX_TOKENS,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+        )
+        return response.choices[0].message.content
+
+    elif provider == "ollama":
+        host = os.environ.get("OLLAMA_HOST", PROVIDER_DEFAULTS["ollama"]["host"])
+        url = f"{host}/api/chat"
+        payload = json.dumps({
+            "model": model,
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content},
+            ],
+        }).encode()
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+        return data["message"]["content"]
+
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
 
 
 def _check_rate_limit(client_ip: str) -> bool:
@@ -299,6 +423,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._serve_status()
         elif self.path == "/api/health":
             self._serve_health()
+        elif self.path == "/api/analyst/info":
+            self._serve_analyst_info()
         else:
             self.send_error(404)
 
@@ -333,23 +459,28 @@ class DashboardHandler(BaseHTTPRequestHandler):
     def _serve_health(self):
         self._json({"runner": ping_runner()})
 
+    def _serve_analyst_info(self):
+        """Return analyst provider info (no secrets exposed)."""
+        available, reason = _analyst_available()
+        self._json({
+            "available": available,
+            "provider": ANALYST_PROVIDER,
+            "model": _get_analyst_model() if available else None,
+            "reason": reason if not available else None,
+        })
+
     def _serve_analyst(self):
-        """AI Analyst endpoint — read-only decision interpreter."""
+        """AI Analyst endpoint — read-only decision interpreter (multi-provider)."""
         # Rate limit
         client_ip = self.client_address[0]
         if not _check_rate_limit(client_ip):
             self._json_error(429, "Rate limited. Please wait before sending another message.")
             return
 
-        # Check dependency
-        if not _HAS_ANTHROPIC:
-            self._json_error(503, "AI Analyst not available (anthropic package not installed)")
-            return
-
-        # Check API key
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            self._json_error(503, "AI Analyst not configured (missing ANTHROPIC_API_KEY)")
+        # Check provider availability
+        available, reason = _analyst_available()
+        if not available:
+            self._json_error(503, f"AI Analyst not available ({reason})")
             return
 
         # Read and validate body
@@ -394,23 +525,12 @@ class DashboardHandler(BaseHTTPRequestHandler):
             f"Operator question: {message}"
         )
 
-        # Call Claude API
+        # Call LLM
         try:
-            client = anthropic.Anthropic(api_key=api_key)
-            response = client.messages.create(
-                model=ANTHROPIC_MODEL,
-                max_tokens=CHAT_MAX_TOKENS,
-                system=ANALYST_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_content}],
-            )
-            answer = response.content[0].text
-        except anthropic.APIError as exc:
-            logger.error("Anthropic API error: %s", exc)
-            self._json_error(502, "AI Analyst temporarily unavailable")
-            return
+            answer = _call_llm(ANALYST_SYSTEM_PROMPT, user_content)
         except Exception as exc:
-            logger.error("Analyst handler error: %s", exc)
-            self._json_error(500, "Internal error")
+            logger.error("Analyst LLM call failed (%s): %s", ANALYST_PROVIDER, exc)
+            self._json_error(502, "AI Analyst temporarily unavailable")
             return
 
         self._json({"response": answer})
@@ -453,10 +573,11 @@ def main():
     print(f"[slime-dashboard] listening on http://{HOST}:{PORT}")
     print(f"[slime-dashboard] event log: {LOG_PATH}")
     print(f"[slime-dashboard] seal file: {SEAL_PATH}")
-    if _HAS_ANTHROPIC and os.environ.get("ANTHROPIC_API_KEY"):
-        print(f"[slime-dashboard] AI Analyst: enabled ({ANTHROPIC_MODEL})")
+    available, reason = _analyst_available()
+    if available:
+        print(f"[slime-dashboard] AI Analyst: enabled (provider={ANALYST_PROVIDER}, model={_get_analyst_model()})")
     else:
-        print(f"[slime-dashboard] AI Analyst: disabled (missing dependency or API key)")
+        print(f"[slime-dashboard] AI Analyst: disabled ({reason})")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

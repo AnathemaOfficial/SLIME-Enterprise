@@ -326,7 +326,7 @@
     <div id="analyst-panel" class="analyst-panel analyst-hidden">
         <div class="analyst-header">
             <span class="analyst-title">AI Analyst</span>
-            <span class="analyst-subtitle">Read-only decision interpreter</span>
+            <span class="analyst-subtitle" id="analyst-subtitle">Read-only decision interpreter</span>
             <button class="analyst-close" onclick="toggleAnalyst()">&times;</button>
         </div>
         <div class="analyst-messages" id="analyst-messages"></div>
@@ -527,6 +527,19 @@
     // ---- AI Analyst ----
 
     let analystOpen = false;
+
+    // Fetch provider info on load
+    (async function() {
+        try {
+            const info = await fetchJSON('/api/analyst/info');
+            const sub = document.getElementById('analyst-subtitle');
+            if (info.available) {
+                sub.textContent = info.provider + ' / ' + info.model;
+            } else {
+                sub.textContent = 'Unavailable: ' + info.reason;
+            }
+        } catch(e) {}
+    })();
 
     function toggleAnalyst() {
         analystOpen = !analystOpen;
