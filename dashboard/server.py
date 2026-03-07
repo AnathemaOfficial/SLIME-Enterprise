@@ -13,13 +13,20 @@ No feedback into SLIME execution. Read-only by construction.
 """
 
 import json
+import logging
 import os
+import shutil
 import socket
 import struct
-import subprocess
+import subprocess  # noqa: S404 — needed for systemctl queries
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
+
+logger = logging.getLogger("slime-dashboard")
+
+# Resolve absolute path for systemctl once at import time.
+SYSTEMCTL_BIN = shutil.which("systemctl") or "/usr/bin/systemctl"
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -120,17 +127,18 @@ def get_service_status(name: str) -> dict:
     """Query systemd for a service's status."""
     try:
         r = subprocess.run(
-            ["systemctl", "is-active", name],
+            [SYSTEMCTL_BIN, "is-active", name],
             capture_output=True, text=True, timeout=3,
         )
         active = r.stdout.strip()
-    except Exception:
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("systemctl is-active %s failed: %s", name, exc)
         active = "unknown"
 
     pid, since = "", ""
     try:
         r = subprocess.run(
-            ["systemctl", "show", name,
+            [SYSTEMCTL_BIN, "show", name,
              "--property=MainPID,ActiveEnterTimestamp"],
             capture_output=True, text=True, timeout=3,
         )
@@ -139,8 +147,8 @@ def get_service_status(name: str) -> dict:
                 pid = line.split("=", 1)[1]
             elif line.startswith("ActiveEnterTimestamp="):
                 since = line.split("=", 1)[1]
-    except Exception:
-        pass
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("systemctl show %s failed: %s", name, exc)
 
     return {"name": name, "active": active, "pid": pid, "since": since}
 

@@ -1,0 +1,38 @@
+name: CI — SLIME Enterprise
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  rust-checks:
+    name: Rust (actuator-min)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --manifest-path actuator-min/Cargo.toml
+      - run: cargo clippy --manifest-path actuator-min/Cargo.toml -- -D warnings
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit --file actuator-min/Cargo.lock
+
+  python-lint:
+    name: Python (Bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install bandit
+      - run: bandit -r dashboard installer deploy -f txt
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y shellcheck
+      - run: shellcheck deploy/*.sh installer/*.sh adversarial/phase4/*.sh
