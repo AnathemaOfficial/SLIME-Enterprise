@@ -28,8 +28,9 @@ jobs:
           python-version: "3.12"
       - run: pip install bandit
       # Skip B404 (import subprocess) — intentional for systemctl queries.
+      # Skip B310 (urllib urlopen) — used for local Ollama API only, URL from env var.
       # Fail only on MEDIUM+ severity to avoid blocking on informational LOW findings.
-      - run: bandit -r dashboard installer deploy -f txt --skip B404 -ll
+      - run: bandit -r dashboard installer deploy -f txt --skip B404,B310 -ll
 
   shellcheck:
     name: ShellCheck

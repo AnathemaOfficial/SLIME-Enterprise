@@ -25,7 +25,7 @@ import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
-import urllib.request
+import urllib.request  # noqa: S310 — used for local Ollama API only
 import urllib.error
 
 # AI Analyst dependencies (graceful degradation if absent)
