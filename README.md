@@ -39,7 +39,3 @@ runner with a stub resolver. This repo adds:
 - Linux server (Ubuntu 22.04+ / Debian 12+)
 - SLIME runner binary (compiled from public repo with `real_ab` feature)
 - Anathema-Breaker engine (private dependency)
-
-## License
-
-Proprietary. Copyright (c) 2026 SYFCORP. All rights reserved.
