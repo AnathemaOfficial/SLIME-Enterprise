@@ -5,7 +5,7 @@
 
 **Sealed Law-layer Execution Environment — Enterprise Appliance**
 
-Private commercial distribution by SYFCORP.
+Open source enterprise appliance by SYFCORP.
 
 ## Contents
 
@@ -21,7 +21,7 @@ Private commercial distribution by SYFCORP.
 
 ## Relationship to SLIME (Public)
 
-This repo contains the **commercial enterprise layer** built on top of the
+This repo contains the **production enterprise layer** built on top of the
 open-source [SLIME](https://github.com/AnathemaOfficial/SLIME) framework.
 
 SLIME (public) provides the canonical specs, formal core, and a reference
@@ -38,4 +38,4 @@ runner with a stub resolver. This repo adds:
 
 - Linux server (Ubuntu 22.04+ / Debian 12+)
 - SLIME runner binary (compiled from public repo with `real_ab` feature)
-- Anathema-Breaker engine (private dependency)
+- Anathema-Breaker engine ([open source](https://github.com/AnathemaOfficial/Anathema-Breaker))
