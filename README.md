@@ -1,5 +1,5 @@
 
-<img width="1199" height="349" alt="SLIME logo ENTERPRISE" src="https://github.com/user-attachments/assets/d5961f33-9189-4c5f-bd9e-7fef745bd077" />
+<img width="1199" height="349" alt="SLIME logo ENTERPRISE" src="https://github.com/user-attachments/assets/3cfdde9c-0052-48a9-9b68-0ebc85182c01" />
 
 # SLIME Enterprise
 
