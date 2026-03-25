@@ -41,3 +41,12 @@ jobs:
       # Exclude SC1090 (non-constant source) and SC2034 (unused variable)
       # which are false positives in adversarial test scripts.
       - run: shellcheck -e SC1090,SC2034 deploy/*.sh installer/*.sh adversarial/phase4/*.sh
+
+  packaging-checks:
+    name: Packaging Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: test -f installer/systemd/slime-dashboard.service
+      - run: test -f releases/SHA256SUMS
+      - run: sha256sum -c releases/SHA256SUMS

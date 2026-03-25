@@ -1,0 +1,27 @@
+Artifact name:
+slime-appliance-v0.2.1-hello-world-candidate.tar.gz
+
+Required bundle contents:
+- installer/install.sh
+- installer/uninstall.sh
+- installer/bin/slime-runner
+- installer/bin/actuator-min
+- installer/bin/fireplank-guard-boot.sh
+- installer/bin/generate-seal.sh
+- installer/systemd/slime.service
+- installer/systemd/actuator.service
+- installer/systemd/fp4-hardening-slime.conf
+- installer/systemd/fp4-hardening-actuator.conf
+- releases/SHA256SUMS
+
+Optional bundle contents:
+- installer/systemd/slime-dashboard.service
+- dashboard/
+
+Validation target:
+- clean Linux install
+- service boot
+- egress socket present
+- one authorized hello-world action
+- one actuator event
+- clean reboot recovery

@@ -1,0 +1,27 @@
+[Unit]
+Description=SLIME Dashboard (read-only observation) - noncanon enterprise surface
+After=network.target actuator.service
+Wants=actuator.service
+
+[Service]
+Type=simple
+User=slime
+Group=slime-actuator
+ExecStart=/usr/bin/python3 /opt/slime/dashboard/server.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+ReadOnlyPaths=/var/log/slime-actuator /usr/lib/slime
+
+[Install]
+WantedBy=multi-user.target

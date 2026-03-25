@@ -24,10 +24,10 @@ If behavior must change, it must be versioned.
 
 Because:
 
-- Fixed-size ABI eliminates framing ambiguity.
-- No JSON, no parsing, no schema drift.
-- Deterministic contract.
-- Easier auditability.
+- fixed-size ABI eliminates framing ambiguity
+- no JSON, no parsing, no schema drift
+- deterministic contract
+- easier auditability
 
 A variable-length payload increases complexity and attack surface.
 
@@ -41,11 +41,6 @@ SLIME emits only:
 
 Reasoning belongs outside the law-layer.
 
-Explanations are:
-- interpretive
-- contextual
-- mutable
-
 The law-layer must remain binary and deterministic.
 
 ---
@@ -57,10 +52,10 @@ SLIME must not run.
 
 This guarantees:
 
-- No silent bypass
-- No fallback mode
-- No degraded behavior
-- No implicit unsafe execution
+- no silent bypass
+- no fallback mode
+- no degraded behavior
+- no implicit unsafe execution
 
 The system either operates correctly, or not at all.
 
@@ -112,16 +107,16 @@ SLIME is not:
 - a policy engine
 - an authorization server
 
-It is a deterministic membrane at the point-of-effect.
+It is a deterministic membrane at the point of effect.
 
 ---
 
 ## What happens if the actuator crashes?
 
-- The Unix socket disappears.
-- SLIME cannot emit.
-- Boot/start fails.
-- System remains fail-closed.
+- the Unix socket disappears
+- SLIME cannot emit
+- boot/start fails
+- system remains fail-closed
 
 No partial operation.
 
@@ -142,12 +137,16 @@ but the law-layer remains local.
 
 ## Is this production-ready?
 
-Enterprise v0.1 guarantees:
+Not yet as an unconditional claim.
+
+The current appliance provides:
 
 - deterministic ABI
 - systemd integration
-- reboot stability
-- fail-closed behavior
+- boot integrity floor
+- fail-closed service dependency
 - documented contract
 
-Future versions may extend packaging and validation tooling.
+It should be treated as an **appliance-grade build candidate**.
+Before calling it fully ready-to-ship, release provenance, installer e2e
+validation, and packaging discipline should be sealed alongside the bundle.
