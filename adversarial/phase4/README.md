@@ -93,7 +93,7 @@ Run order:
 
 Invariant: actuator integrity and canon egress behavior under adversarial conditions.
 
-These tests validate FirePlank-Guard invariants (see `enterprise/ACTUATOR_TCB.md`)
+These tests validate FirePlank-Guard invariants (see `docs/ACTUATOR_TCB.md`)
 and canon backpressure model.
 
 ### T06 — Replay Frame Attack

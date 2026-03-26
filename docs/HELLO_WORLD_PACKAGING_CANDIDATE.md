@@ -183,7 +183,7 @@ This candidate still leaves later work:
 
 Later packaging should allow the clean chain:
 
-`SLAPY -> SAFA -> SLIME-Enterprise -> actuator -> system effect`
+`SCLAPY -> SAFA -> SLIME-Enterprise -> actuator -> system effect`
 
 `SAFA` is not part of this package.
 It is the adjacent adapter layer that will rely on this appliance for a

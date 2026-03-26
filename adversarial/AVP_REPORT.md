@@ -1,15 +1,8 @@
-```
-enterprise/adversarial/AVP_REPORT.md
-```
-
----
-
-```markdown
-# SLIME Appliance — AVP Report  
+# SLIME Appliance — AVP Report
 **Adversarial Validation Protocol — Deterministic Execution**
 
-Node: `syf-node`  
-Date: 2026-02-26  
+Node: `syf-node`
+Date: 2026-02-26
 Status: ✅ **GLOBAL = HELD**
 
 ---
@@ -30,7 +23,7 @@ This AVP validates that SLIME enforces:
 
 # T01 — Fail-Closed Boot
 
-**Condition:** actuator socket absent at service start  
+**Condition:** actuator socket absent at service start
 
 **Expected:**
 - SLIME does not start
@@ -48,7 +41,7 @@ SLIME does not operate without a valid egress socket at boot.
 
 # T02 — Nominal Authorized Flow
 
-**Condition:** valid input + actuator running  
+**Condition:** valid input + actuator running
 
 **Expected:**
 - HTTP 200
@@ -69,7 +62,7 @@ Ingress → Egress path is deterministic and correct.
 
 # T03 — Invalid Input
 
-**Condition:** malformed or incomplete request  
+**Condition:** malformed or incomplete request
 
 **Expected:**
 - HTTP 200
@@ -89,7 +82,7 @@ Invalid input cannot trigger actuation.
 
 # T04 — Concurrent Requests
 
-**Condition:** two simultaneous valid requests  
+**Condition:** two simultaneous valid requests
 
 **Expected:**
 - Two `AUTHORIZED` responses
@@ -110,7 +103,7 @@ Concurrency safe under tested load.
 
 # T05 — Runtime Egress Failure
 
-**Condition:** actuator stopped while SLIME running  
+**Condition:** actuator stopped while SLIME running
 
 **Expected:**
 - HTTP 200
@@ -147,7 +140,6 @@ Runtime fail-closed confirmed.
 # Final Verdict
 
 ```
-
 T01: HELD
 T02: HELD
 T03: HELD
@@ -155,7 +147,6 @@ T04: HELD
 T05: HELD
 
 GLOBAL: HELD
-
 ```
 
 SLIME Appliance v0 satisfies AVP structural requirements.
@@ -165,9 +156,7 @@ SLIME Appliance v0 satisfies AVP structural requirements.
 # Recommended Tag
 
 ```
-
 slime-v0-avp-held
-
 ```
 
 ---
@@ -183,6 +172,3 @@ slime-v0-avp-held
 ---
 
 **End of AVP Report**
-```
-
----
