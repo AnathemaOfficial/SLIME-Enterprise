@@ -16,6 +16,7 @@ No feedback into SLIME execution. Read-only by construction.
 import json
 import logging
 import os
+import re
 import shutil
 import socket
 import struct
@@ -94,6 +95,9 @@ PROVIDER_DEFAULTS = {
     "ollama":    {"model": "qwen2.5:14b", "host": "http://localhost:11434"},
 }
 
+FRAME_HEX_RE = re.compile(r"FRAME_HEX=([0-9a-f]{64})")
+RAW_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
+
 CHAT_MAX_TOKENS = 1024
 CHAT_RATE_LIMIT_SECONDS = 2
 CHAT_MAX_BODY_BYTES = 4096
@@ -145,6 +149,15 @@ def _get_analyst_model() -> str:
 def _analyst_available() -> tuple[bool, str]:
     """Check if the analyst is available. Returns (available, reason)."""
     provider = ANALYST_PROVIDER
+    if provider == "ollama":
+        host = os.environ.get("OLLAMA_HOST", PROVIDER_DEFAULTS["ollama"]["host"]).rstrip("/")
+        try:
+            with urllib.request.urlopen(f"{host}/api/tags", timeout=2) as resp:
+                if resp.status < 200 or resp.status >= 300:
+                    return False, f"ollama returned HTTP {resp.status}"
+        except Exception as exc:
+            return False, f"ollama unavailable ({exc})"
+        return True, "ok"
     if provider == "anthropic":
         if not _HAS_ANTHROPIC:
             return False, "anthropic package not installed"
@@ -250,17 +263,14 @@ def extract_hex(line: str) -> str | None:
 
     Handles two formats produced by the actuator:
       - Raw hex:        <64 hex chars>
-      - Sed-piped:      FRAME_HEX=<64 hex chars>
+      - Tagged line:    ... FRAME_HEX=<64 hex chars>
     """
     line = line.strip()
-    if line.startswith("FRAME_HEX="):
-        line = line[len("FRAME_HEX="):]
-    if len(line) == 64:
-        try:
-            bytes.fromhex(line)
-            return line
-        except ValueError:
-            pass
+    tagged = FRAME_HEX_RE.search(line)
+    if tagged is not None:
+        return tagged.group(1)
+    if RAW_HEX_RE.fullmatch(line):
+        return line
     return None
 
 

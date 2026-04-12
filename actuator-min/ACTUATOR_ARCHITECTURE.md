@@ -1,12 +1,13 @@
 # ACTUATOR_ARCHITECTURE
 
-`actuator-min` is a one-way sink for SLIME egress.
+`actuator-min` is a one-way sink for SLIME egress with a local replay floor.
 
 ## Boundaries
 
 - Input only: `/run/slime/egress.sock` (Unix stream listener).
 - No response path to SLIME. The actuator never writes back to the socket.
-- Output side effect is local logging only (`stderr` and optional append to `/var/log/slime-actuator/events.log`).
+- Output side effect is local logging only (`FRAME_HEX=...` lines appended to `/var/log/slime-actuator/events.log`).
+- Replay protection is local to the actuator via an append-only token journal at `/var/log/slime-actuator/replay-journal.bin`.
 
 ## Fixed ABI
 
@@ -24,7 +25,8 @@ Any non-32-byte delivery is dropped by `read_exact` failure handling.
 - Stale socket removal failure terminates startup.
 - Listener accept errors terminate the process.
 - Per-connection read timeout drops the connection and continues.
-- Logging to disk is best-effort and non-semantic.
+- Replay-journal corruption or write failure terminates the process.
+- Duplicate `actuation_token` values are dropped silently.
 
 ## Ownership/permissions
 
