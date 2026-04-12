@@ -1,2 +1,3 @@
 actuator-min/target/
-dashboard/__pycache__/
+__pycache__/
+*.py[cod]
