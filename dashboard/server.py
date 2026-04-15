@@ -673,7 +673,21 @@ class DashboardHandler(BaseHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    # Threads die with the process, never leak past shutdown.
     daemon_threads = True
+    # Qwen audit finding MED-01: a ThreadingMixIn server without a
+    # request-level timeout can be held open by a slow client (slow POST
+    # body, half-closed connection) until thread-pool exhaustion. We set
+    # `timeout` here so the underlying SocketServer handler blocks accept()
+    # for at most 30 s and propagates a deadline to handler sockets.
+    timeout = 30
+
+
+# Handler-level timeout. BaseHTTPRequestHandler inherits StreamRequestHandler
+# from socketserver, which applies `self.timeout` to the per-connection
+# socket. Without this, recv() on the request body blocks forever and one
+# idle attacker ties up a worker thread for the life of the process.
+DashboardHandler.timeout = 30
 
 
 # ---------------------------------------------------------------------------
