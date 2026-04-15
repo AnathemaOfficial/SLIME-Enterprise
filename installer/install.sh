@@ -27,7 +27,7 @@ sudo install -m 0755 "$SCRIPT_DIR/bin/fireplank-guard-boot.sh" "$BIN_DIR/firepla
 sudo install -m 0755 "$SCRIPT_DIR/bin/generate-seal.sh" "$BIN_DIR/generate-seal.sh"
 
 echo "[4/11] Generate seal file"
-sudo mkdir -p "$SEAL_DIR"
+sudo install -d -m 0750 -o root -g slime-actuator "$SEAL_DIR"
 sudo "$BIN_DIR/generate-seal.sh"
 
 echo "[5/11] Create log directory"

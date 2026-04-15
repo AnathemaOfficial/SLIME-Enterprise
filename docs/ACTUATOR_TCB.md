@@ -71,11 +71,11 @@ This addresses the **toolchain compromise** risk identified in V1_INVARIANTS (ex
 Sealed hashes live in a **read-only file**, not in the script itself.
 If the script contained the hashes, an attacker who modifies the script could also change the expected values.
 
-**Seal file:** `/usr/lib/slime/fireplank.seal` (owned by root, permissions `0444`)
+**Seal file:** `/usr/lib/slime/fireplank.seal` (owned by `root:slime-actuator`, permissions `0440`)
 ```
 # fireplank.seal — generated at deploy time, read-only after installation
 ACTUATOR_BIN_HASH=<sha256-of-actuator-binary>
-DOMAIN_REG_HASH=<sha256-of-domain-registry>
+RUNNER_BIN_HASH=<sha256-of-runner-binary>
 ```
 
 **Guard script:**
@@ -91,25 +91,26 @@ if [ ! -r "$SEAL_FILE" ]; then
     exit 1
 fi
 
-. "$SEAL_FILE"
+ACTUATOR_BIN_HASH=$(grep '^ACTUATOR_BIN_HASH=' "$SEAL_FILE" | cut -d= -f2)
+RUNNER_BIN_HASH=$(grep '^RUNNER_BIN_HASH=' "$SEAL_FILE" | cut -d= -f2)
 
 ACTUAL_BIN_HASH=$(sha256sum /usr/local/bin/actuator-min | cut -d' ' -f1)
-ACTUAL_REG_HASH=$(sha256sum /etc/slime/domain-registry.json | cut -d' ' -f1)
+ACTUAL_RUNNER_HASH=$(sha256sum /usr/local/bin/slime-runner | cut -d' ' -f1)
 
 if [ "$ACTUAL_BIN_HASH" != "$ACTUATOR_BIN_HASH" ]; then
     echo "FIREPLANK: actuator binary integrity FAILED" >&2
     exit 1
 fi
 
-if [ "$ACTUAL_REG_HASH" != "$DOMAIN_REG_HASH" ]; then
-    echo "FIREPLANK: domain registry integrity FAILED" >&2
+if [ "$ACTUAL_RUNNER_HASH" != "$RUNNER_BIN_HASH" ]; then
+    echo "FIREPLANK: runner binary integrity FAILED" >&2
     exit 1
 fi
 
 echo "FIREPLANK: integrity OK"
 ```
 
-**Note:** The seal file is generated once at deploy time and must not be modified in production. If either the binary or registry changes, a new seal file must be generated and deployed (full redeploy cycle).
+**Note:** The seal file is generated once at deploy time and must not be modified in production. It is parsed as data, never sourced as shell. If either binary changes, a new seal file must be generated and deployed (full redeploy cycle).
 
 ### FP-2: Replay Floor (Anti-Injection)
 
