@@ -1,0 +1,91 @@
+SLIME-Enterprise — SLIME canonical substrate (enterprise deployment surface)
+==============================================================================
+
+Copyright 2025-2026 Technologies CoreXalt Inc.
+All Rights Reserved.
+
+This product (the "Work") is owned by Technologies CoreXalt Inc.
+("CoreXalt"), a Québec corporation (incorporation via notary, 2026).
+
+Provenance and attribution
+--------------------------
+
+The Work was originally authored and developed by:
+
+  - Sébastien Bouchard ("Fireplank"), primary architect, original author,
+    and principal contributor.
+
+Initial authorship and publication occurred under the informal SYFCORP
+operating banner (2025-2026), as the enterprise-facing deployment surface
+of the SLIME canonical substrate. On the formation of Technologies
+CoreXalt Inc. (2026), all rights, title, and interest in the Work —
+including copyrights, trade secrets, and any associated intellectual-
+property claims — were assigned to CoreXalt.
+
+License
+-------
+
+This Work is licensed under the Apache License, Version 2.0 (the "License");
+you may not use this Work except in compliance with the License. You may
+obtain a copy of the License at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+See the LICENSE file at the root of this repository for the full license
+text. Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+
+Components
+----------
+
+This Work is composed of several cooperating components:
+
+  - actuator-min (Rust, std library only) — reference egress actuator with
+    anti-replay journal and 32-byte frame ABI.
+  - dashboard (Python, stdlib http.server) — analyst-facing observational
+    dashboard with optional LLM-backed context analysis.
+  - installer / deploy (POSIX shell + systemd) — production deployment
+    scripts, boot-time integrity guard, and systemd unit definitions.
+  - adversarial (POSIX shell) — adversarial testing harness (phase 4).
+
+Third-party components
+----------------------
+
+The Rust `actuator-min` binary depends solely on the Rust standard library
+and has no external Cargo dependencies.
+
+The Python `dashboard` component dynamically loads optional third-party
+libraries when present:
+
+  - anthropic (MIT, Copyright Anthropic, PBC) — optional, for LLM context
+  - openai (MIT, Copyright OpenAI) — optional, for LLM context
+
+These dependencies are imported with graceful degradation if absent.
+
+Any future additions will be declared in this section together with their
+respective licenses.
+
+Trademarks
+----------
+
+"SLIME", "SLIME-Enterprise", "Anathema", "SYF", "Fireplank", and related
+marks used across the wider SYF ecosystem are unregistered trademarks of
+Technologies CoreXalt Inc. Use of these marks in derivative works, forks,
+or products requires prior written authorization.
+
+Contact
+-------
+
+For licensing inquiries, commercial-use questions, authorship verification,
+or any other matter concerning this NOTICE or the Work:
+
+    Technologies CoreXalt Inc.
+    Email: syfcorp@proton.me
+
+---
+
+This NOTICE file is provided in accordance with section 4(d) of the
+Apache License 2.0. Redistributions of this Work — in source or binary
+form — must include a copy of this NOTICE as part of any derivative
+attribution.
