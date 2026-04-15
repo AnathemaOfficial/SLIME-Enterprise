@@ -35,6 +35,25 @@ systemctl is-active slime-dashboard.service
 curl -fsS http://127.0.0.1:8081/ >/dev/null
 ```
 
+If the optional AI Analyst surface is enabled, configure its shared token and
+local Ollama endpoint in `/etc/slime/dashboard.env`:
+
+```bash
+sudo install -d -m 0750 /etc/slime
+sudo sh -c 'cat > /etc/slime/dashboard.env <<EOF
+ANALYST_SHARED_TOKEN=replace-with-long-random-token
+OLLAMA_HOST=http://127.0.0.1:11434
+EOF'
+sudo chmod 0640 /etc/slime/dashboard.env
+sudo systemctl restart slime-dashboard.service
+```
+
+Notes:
+
+- `/api/analyst` now fails closed unless `ANALYST_SHARED_TOKEN` is configured.
+- `OLLAMA_HOST` must remain localhost-only (`127.0.0.1`, `localhost`, or `::1`).
+- Send the shared token in the `X-SLIME-Token` header when calling `/api/analyst`.
+
 ## Reboot proof
 
 ```bash

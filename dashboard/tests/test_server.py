@@ -38,16 +38,17 @@ def running_server():
         httpd.server_close()
 
 
-def request_json(method: str, path: str, body=None):
+def request_json(method: str, path: str, body=None, headers=None):
     payload = None
-    headers = {}
+    request_headers = dict(headers or {})
+    request_headers.setdefault("Connection", "close")
     if body is not None:
         payload = json.dumps(body)
-        headers["Content-Type"] = "application/json"
+        request_headers["Content-Type"] = "application/json"
 
     with running_server() as port:
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        conn.request(method, path, body=payload, headers=headers)
+        conn.request(method, path, body=payload, headers=request_headers)
         response = conn.getresponse()
         raw = response.read().decode()
         conn.close()
@@ -106,6 +107,39 @@ class DecodeAndLogTests(unittest.TestCase):
         self.assertEqual(domain_counts, {"test": 1, "deploy": 1})
         self.assertEqual([event["domain"] for event in events], ["deploy", "test"])
 
+    def test_read_log_tail_lines_drops_partial_first_line(self):
+        line1 = "noise"
+        line2 = f"FRAME_HEX={make_frame_hex(domain_id=0, magnitude=1, token=1)}"
+        line3 = f"FRAME_HEX={make_frame_hex(domain_id=2, magnitude=2, token=2)}"
+        content = "\n".join([line1, line2, line3]) + "\n"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "events.log"
+            log_path.write_text(content, encoding="utf-8")
+            tail = server.read_log_tail_lines(str(log_path), max_bytes=len(content) - 2, max_lines=10)
+
+        self.assertEqual(tail, [line2, line3])
+
+    def test_read_log_uses_bounded_tail_window(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            log_path = Path(tmpdir) / "events.log"
+            lines = [
+                f"FRAME_HEX={make_frame_hex(domain_id=0, magnitude=idx, token=idx)}"
+                for idx in range(1, 40)
+            ]
+            log_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            with mock.patch.object(server, "LOG_PATH", str(log_path)), \
+                 mock.patch.object(server, "MAX_LOG_TAIL_BYTES", len("\n".join(lines[-6:])) + 8), \
+                 mock.patch.object(server, "MAX_LOG_TAIL_LINES", 6):
+                events, total, domain_counts = server.read_log()
+
+        self.assertLess(total, len(lines))
+        self.assertEqual(total, 6)
+        self.assertEqual(len(events), 6)
+        self.assertEqual(events[0]["magnitude"], 39)
+        self.assertEqual(events[-1]["magnitude"], 34)
+        self.assertEqual(domain_counts, {"test": 6})
+
 
 class AnalystAvailabilityTests(unittest.TestCase):
     def test_openai_provider_requires_api_key(self):
@@ -132,6 +166,14 @@ class AnalystAvailabilityTests(unittest.TestCase):
         self.assertFalse(available)
         self.assertIn("ollama unavailable", reason)
 
+    def test_ollama_provider_rejects_remote_host(self):
+        with mock.patch.object(server, "ANALYST_PROVIDER", "ollama"), \
+             mock.patch.dict(server.os.environ, {"OLLAMA_HOST": "http://10.0.0.8:11434"}, clear=True):
+            available, reason = server._analyst_available()
+
+        self.assertFalse(available)
+        self.assertIn("localhost only", reason)
+
     def test_ollama_provider_accepts_successful_probe(self):
         response = mock.MagicMock()
         response.__enter__.return_value.status = 200
@@ -142,6 +184,12 @@ class AnalystAvailabilityTests(unittest.TestCase):
 
         self.assertTrue(available)
         self.assertEqual(reason, "ok")
+
+    def test_get_ollama_host_accepts_localhost_url(self):
+        with mock.patch.dict(server.os.environ, {"OLLAMA_HOST": "http://127.0.0.1:11434"}, clear=True):
+            host = server._get_ollama_host()
+
+        self.assertEqual(host, "http://127.0.0.1:11434")
 
 
 class AnalystContextTests(unittest.TestCase):
@@ -191,34 +239,86 @@ class HandlerTests(unittest.TestCase):
         self.assertTrue(body["runner"]["reachable"])
 
     def test_analyst_info_reports_unavailable_provider(self):
-        with mock.patch.object(server, "_analyst_available", return_value=(False, "missing key")):
+        with mock.patch.object(server, "_analyst_available", return_value=(False, "missing key")), \
+             mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True):
             status, body = request_json("GET", "/api/analyst/info")
 
         self.assertEqual(status, 200)
         self.assertFalse(body["available"])
         self.assertEqual(body["reason"], "missing key")
+        self.assertTrue(body["auth_required"])
+        self.assertTrue(body["auth_configured"])
+        self.assertEqual(body["auth_header"], server.ANALYST_AUTH_HEADER)
+
+    def test_analyst_post_rejects_when_auth_not_configured(self):
+        with mock.patch.dict(server.os.environ, {}, clear=True):
+            status, body = request_json("POST", "/api/analyst", {"message": "hello"})
+
+        self.assertEqual(status, 503)
+        self.assertIn("auth not configured", body["error"])
+
+    def test_analyst_post_rejects_missing_token(self):
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True):
+            status, body = request_json("POST", "/api/analyst", {"message": "hello"})
+
+        self.assertEqual(status, 403)
+        self.assertIn(server.ANALYST_AUTH_HEADER, body["error"])
+
+    def test_analyst_post_rejects_invalid_token(self):
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True):
+            status, body = request_json(
+                "POST",
+                "/api/analyst",
+                {"message": "hello"},
+                headers={server.ANALYST_AUTH_HEADER: "wrong"},
+            )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(body["error"], "Invalid analyst token")
 
     def test_analyst_post_rejects_rate_limited_requests(self):
-        with mock.patch.object(server, "_check_rate_limit", return_value=False):
-            status, body = request_json("POST", "/api/analyst", {"message": "hello"})
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True), \
+             mock.patch.object(server, "_check_rate_limit", return_value=False):
+            status, body = request_json(
+                "POST",
+                "/api/analyst",
+                {"message": "hello"},
+                headers={server.ANALYST_AUTH_HEADER: "secret"},
+            )
 
         self.assertEqual(status, 429)
         self.assertIn("Rate limited", body["error"])
 
     def test_analyst_post_rejects_when_provider_unavailable(self):
-        with mock.patch.object(server, "_check_rate_limit", return_value=True), \
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True), \
+             mock.patch.object(server, "_check_rate_limit", return_value=True), \
              mock.patch.object(server, "_analyst_available", return_value=(False, "missing key")):
-            status, body = request_json("POST", "/api/analyst", {"message": "hello"})
+            status, body = request_json(
+                "POST",
+                "/api/analyst",
+                {"message": "hello"},
+                headers={server.ANALYST_AUTH_HEADER: "secret"},
+            )
 
         self.assertEqual(status, 503)
         self.assertIn("missing key", body["error"])
 
     def test_analyst_post_rejects_invalid_json(self):
         with running_server() as port, \
+             mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True), \
              mock.patch.object(server, "_check_rate_limit", return_value=True), \
              mock.patch.object(server, "_analyst_available", return_value=(True, "ok")):
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-            conn.request("POST", "/api/analyst", body="{bad json", headers={"Content-Type": "application/json"})
+            conn.request(
+                "POST",
+                "/api/analyst",
+                body="{bad json",
+                headers={
+                    "Content-Type": "application/json",
+                    "Connection": "close",
+                    server.ANALYST_AUTH_HEADER: "secret",
+                },
+            )
             response = conn.getresponse()
             body = json.loads(response.read().decode())
             conn.close()
@@ -227,31 +327,49 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(body["error"], "Invalid JSON")
 
     def test_analyst_post_rejects_empty_message(self):
-        with mock.patch.object(server, "_check_rate_limit", return_value=True), \
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True), \
+             mock.patch.object(server, "_check_rate_limit", return_value=True), \
              mock.patch.object(server, "_analyst_available", return_value=(True, "ok")):
-            status, body = request_json("POST", "/api/analyst", {"message": "   "})
+            status, body = request_json(
+                "POST",
+                "/api/analyst",
+                {"message": "   "},
+                headers={server.ANALYST_AUTH_HEADER: "secret"},
+            )
 
         self.assertEqual(status, 400)
         self.assertEqual(body["error"], "Empty message")
 
     def test_analyst_post_returns_502_when_llm_call_fails(self):
-        with mock.patch.object(server, "_check_rate_limit", return_value=True), \
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True), \
+             mock.patch.object(server, "_check_rate_limit", return_value=True), \
              mock.patch.object(server, "_analyst_available", return_value=(True, "ok")), \
              mock.patch.object(server.analyst_context, "build_static_context", return_value="static"), \
              mock.patch.object(server.analyst_context, "build_live_context", return_value="live"), \
              mock.patch.object(server, "_call_llm", side_effect=RuntimeError("boom")):
-            status, body = request_json("POST", "/api/analyst", {"message": "hello"})
+            status, body = request_json(
+                "POST",
+                "/api/analyst",
+                {"message": "hello"},
+                headers={server.ANALYST_AUTH_HEADER: "secret"},
+            )
 
         self.assertEqual(status, 502)
         self.assertEqual(body["error"], "AI Analyst temporarily unavailable")
 
     def test_analyst_post_returns_response_on_success(self):
-        with mock.patch.object(server, "_check_rate_limit", return_value=True), \
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True), \
+             mock.patch.object(server, "_check_rate_limit", return_value=True), \
              mock.patch.object(server, "_analyst_available", return_value=(True, "ok")), \
              mock.patch.object(server.analyst_context, "build_static_context", return_value="static"), \
              mock.patch.object(server.analyst_context, "build_live_context", return_value="live"), \
              mock.patch.object(server, "_call_llm", return_value="verdict"):
-            status, body = request_json("POST", "/api/analyst", {"message": "hello"})
+            status, body = request_json(
+                "POST",
+                "/api/analyst",
+                {"message": "hello"},
+                headers={server.ANALYST_AUTH_HEADER: "secret"},
+            )
 
         self.assertEqual(status, 200)
         self.assertEqual(body["response"], "verdict")

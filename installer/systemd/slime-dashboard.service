@@ -7,6 +7,7 @@ Wants=actuator.service
 Type=simple
 User=slime
 Group=slime-actuator
+EnvironmentFile=-/etc/slime/dashboard.env
 ExecStart=/usr/bin/python3 /opt/slime/dashboard/server.py
 Restart=on-failure
 RestartSec=5

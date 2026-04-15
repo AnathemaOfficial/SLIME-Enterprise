@@ -1,6 +1,6 @@
 #![cfg_attr(not(unix), allow(dead_code, unused_imports))]
 
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::fmt::Write as _;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
@@ -17,6 +17,7 @@ const RUN_DIR: &str = "/run/slime";
 const EVENT_LOG: &str = "/var/log/slime-actuator/events.log";
 const REPLAY_JOURNAL: &str = "/var/log/slime-actuator/replay-journal.bin";
 const EVENT_LOG_PREFIX: &str = "FRAME_HEX=";
+const REPLAY_MAX_TOKENS: usize = 65_536;
 
 #[cfg(unix)]
 const READ_TIMEOUT: Duration = Duration::from_secs(1);
@@ -44,7 +45,7 @@ fn main() -> std::io::Result<()> {
         ensure_dir(parent, 0o750)?;
     }
 
-    let mut journal = ReplayJournal::open(Path::new(REPLAY_JOURNAL))?;
+    let mut journal = ReplayJournal::open(Path::new(REPLAY_JOURNAL), REPLAY_MAX_TOKENS)?;
 
     eprintln!("actuator-min: listening on {SOCK_PATH}");
 
@@ -115,7 +116,7 @@ fn append_event_line(path: &Path, line: &str) -> io::Result<()> {
     Ok(())
 }
 
-fn parse_journal_bytes(data: &[u8]) -> io::Result<HashSet<u128>> {
+fn parse_journal_bytes(data: &[u8]) -> io::Result<VecDeque<u128>> {
     if data.len() % 16 != 0 {
         return Err(io::Error::new(
             ErrorKind::InvalidData,
@@ -123,6 +124,7 @@ fn parse_journal_bytes(data: &[u8]) -> io::Result<HashSet<u128>> {
         ));
     }
 
+    let mut ordered_tokens = VecDeque::with_capacity(data.len() / 16);
     let mut seen_tokens = HashSet::with_capacity(data.len() / 16);
     for chunk in data.chunks_exact(16) {
         let mut token_bytes = [0u8; 16];
@@ -134,9 +136,10 @@ fn parse_journal_bytes(data: &[u8]) -> io::Result<HashSet<u128>> {
                 "replay journal contains duplicate tokens",
             ));
         }
+        ordered_tokens.push_back(token);
     }
 
-    Ok(seen_tokens)
+    Ok(ordered_tokens)
 }
 
 fn token_from_frame(frame: &[u8; 32]) -> u128 {
@@ -158,17 +161,19 @@ fn format_frame_line(frame: &[u8; 32]) -> String {
 struct ReplayJournal {
     file: File,
     seen_tokens: HashSet<u128>,
+    order: VecDeque<u128>,
+    max_entries: usize,
 }
 
 impl ReplayJournal {
-    fn open(path: &Path) -> io::Result<Self> {
+    fn open(path: &Path, max_entries: usize) -> io::Result<Self> {
         if let Some(parent) = path.parent() {
             ensure_dir(parent, 0o750)?;
         }
 
         let mut file = OpenOptions::new()
             .read(true)
-            .append(true)
+            .write(true)
             .create(true)
             .open(path)?;
         set_mode(path, 0o640)?;
@@ -176,10 +181,23 @@ impl ReplayJournal {
         file.seek(SeekFrom::Start(0))?;
         let mut data = Vec::new();
         file.read_to_end(&mut data)?;
-        let seen_tokens = parse_journal_bytes(&data)?;
-        file.seek(SeekFrom::End(0))?;
+        let order = parse_journal_bytes(&data)?;
+        let mut seen_tokens = HashSet::with_capacity(order.len());
+        for token in &order {
+            seen_tokens.insert(*token);
+        }
 
-        Ok(Self { file, seen_tokens })
+        let mut journal = Self {
+            file,
+            seen_tokens,
+            order,
+            max_entries,
+        };
+
+        journal.compact_if_needed()?;
+        journal.file.seek(SeekFrom::End(0))?;
+
+        Ok(journal)
     }
 
     fn record_token(&mut self, token: u128) -> io::Result<bool> {
@@ -187,11 +205,50 @@ impl ReplayJournal {
             return Ok(false);
         }
 
-        self.file.write_all(&token.to_le_bytes())?;
+        let requires_compaction = self.order.len() >= self.max_entries;
+        if requires_compaction {
+            if let Some(oldest) = self.order.pop_front() {
+                self.seen_tokens.remove(&oldest);
+            }
+        }
+
+        self.order.push_back(token);
+        self.seen_tokens.insert(token);
+        if requires_compaction {
+            self.rewrite_file()?;
+        } else {
+            self.file.seek(SeekFrom::End(0))?;
+            self.file.write_all(&token.to_le_bytes())?;
+            self.file.flush()?;
+            self.file.sync_data()?;
+        }
+        Ok(true)
+    }
+
+    fn compact_if_needed(&mut self) -> io::Result<()> {
+        if self.order.len() <= self.max_entries {
+            return Ok(());
+        }
+
+        while self.order.len() > self.max_entries {
+            if let Some(oldest) = self.order.pop_front() {
+                self.seen_tokens.remove(&oldest);
+            }
+        }
+
+        self.rewrite_file()
+    }
+
+    fn rewrite_file(&mut self) -> io::Result<()> {
+        self.file.set_len(0)?;
+        self.file.seek(SeekFrom::Start(0))?;
+        for token in &self.order {
+            self.file.write_all(&token.to_le_bytes())?;
+        }
         self.file.flush()?;
         self.file.sync_data()?;
-        self.seen_tokens.insert(token);
-        Ok(true)
+        self.file.seek(SeekFrom::End(0))?;
+        Ok(())
     }
 }
 
@@ -240,10 +297,10 @@ mod tests {
         journal.extend_from_slice(&7u128.to_le_bytes());
         journal.extend_from_slice(&9u128.to_le_bytes());
 
-        let seen = parse_journal_bytes(&journal).expect("distinct tokens should load");
-        assert!(seen.contains(&7));
-        assert!(seen.contains(&9));
-        assert_eq!(seen.len(), 2);
+        let ordered = parse_journal_bytes(&journal).expect("distinct tokens should load");
+        assert_eq!(ordered.len(), 2);
+        assert_eq!(ordered[0], 7);
+        assert_eq!(ordered[1], 9);
     }
 
     #[test]
@@ -274,7 +331,9 @@ mod tests {
         fs::create_dir_all(parent).expect("create temp dir");
         fs::write(&path, [1u8; 15]).expect("write corrupt journal");
 
-        let err = ReplayJournal::open(&path).err().expect("corrupt journal should fail");
+        let err = ReplayJournal::open(&path, 4)
+            .err()
+            .expect("corrupt journal should fail");
         assert_eq!(err.kind(), ErrorKind::InvalidData);
 
         fs::remove_file(&path).expect("remove corrupt journal");
@@ -288,18 +347,56 @@ mod tests {
         fs::create_dir_all(parent).expect("create temp dir");
 
         {
-            let mut journal = ReplayJournal::open(&path).expect("open journal");
+            let mut journal = ReplayJournal::open(&path, 4).expect("open journal");
             assert!(journal.record_token(42).expect("record first token"));
             assert!(!journal.record_token(42).expect("drop duplicate token"));
         }
 
         {
-            let mut reopened = ReplayJournal::open(&path).expect("reopen journal");
+            let mut reopened = ReplayJournal::open(&path, 4).expect("reopen journal");
             assert!(!reopened.record_token(42).expect("persisted token should replay-drop"));
             assert!(reopened.record_token(99).expect("record second token"));
         }
 
         assert_eq!(fs::metadata(&path).expect("journal metadata").len(), 32);
+
+        fs::remove_file(&path).expect("remove journal");
+        fs::remove_dir_all(parent).expect("remove temp dir");
+    }
+
+    #[test]
+    fn replay_journal_compacts_on_open_when_file_exceeds_capacity() {
+        let path = unique_temp_path("compact-open");
+        let parent = path.parent().expect("journal parent");
+        fs::create_dir_all(parent).expect("create temp dir");
+
+        let mut raw = Vec::new();
+        for token in [1u128, 2, 3, 4, 5] {
+            raw.extend_from_slice(&token.to_le_bytes());
+        }
+        fs::write(&path, raw).expect("seed journal");
+
+        let reopened = ReplayJournal::open(&path, 3).expect("open compacted journal");
+        assert_eq!(reopened.order.iter().copied().collect::<Vec<_>>(), vec![3, 4, 5]);
+        assert_eq!(fs::metadata(&path).expect("journal metadata").len(), 48);
+
+        fs::remove_file(&path).expect("remove journal");
+        fs::remove_dir_all(parent).expect("remove temp dir");
+    }
+
+    #[test]
+    fn replay_journal_evicts_oldest_token_when_capacity_is_reached() {
+        let path = unique_temp_path("compact-insert");
+        let parent = path.parent().expect("journal parent");
+        fs::create_dir_all(parent).expect("create temp dir");
+
+        let mut journal = ReplayJournal::open(&path, 2).expect("open journal");
+        assert!(journal.record_token(10).expect("record first token"));
+        assert!(journal.record_token(20).expect("record second token"));
+        assert!(journal.record_token(30).expect("record third token"));
+        assert_eq!(journal.order.iter().copied().collect::<Vec<_>>(), vec![20, 30]);
+        assert!(!journal.record_token(20).expect("drop existing token"));
+        assert!(journal.record_token(10).expect("oldest evicted token can re-enter"));
 
         fs::remove_file(&path).expect("remove journal");
         fs::remove_dir_all(parent).expect("remove temp dir");

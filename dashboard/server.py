@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import shutil
 import socket
 import struct
@@ -28,6 +29,7 @@ from socketserver import ThreadingMixIn
 
 import urllib.request  # noqa: S310 — used for local Ollama API only
 import urllib.error
+import urllib.parse
 
 # AI Analyst dependencies (graceful degradation if absent)
 try:
@@ -62,6 +64,8 @@ SEAL_PATH = "/usr/lib/slime/fireplank.seal"
 RUNNER_HOST = "127.0.0.1"
 RUNNER_PORT = 8080
 MAX_EVENTS = 50
+MAX_LOG_TAIL_BYTES = 262_144
+MAX_LOG_TAIL_LINES = 4096
 
 # Domain table — mirrors runner's compile-time DOMAIN_TABLE.
 # Must be kept in sync manually. This is noncanon observation convenience.
@@ -102,6 +106,8 @@ CHAT_MAX_TOKENS = 1024
 CHAT_RATE_LIMIT_SECONDS = 2
 CHAT_MAX_BODY_BYTES = 4096
 CHAT_MAX_MESSAGE_CHARS = 2000
+ANALYST_AUTH_HEADER = "X-SLIME-Token"
+LOCAL_ANALYST_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 # System prompt: role and behavior ONLY — no data, no rules.
 # Rules come from analyst_rules.py via analyst_context.build_static_context().
@@ -146,11 +152,51 @@ def _get_analyst_model() -> str:
     return os.environ.get(env_key, PROVIDER_DEFAULTS.get(provider, {}).get("model", ""))
 
 
+def _get_analyst_shared_token() -> str:
+    """Return the shared analyst token, if configured."""
+    return os.environ.get("ANALYST_SHARED_TOKEN", "").strip()
+
+
+def _authorize_analyst_request(headers) -> tuple[bool, int, str]:
+    """Validate the shared-token gate for the analyst endpoint."""
+    expected = _get_analyst_shared_token()
+    if not expected:
+        return False, 503, "AI Analyst auth not configured"
+
+    provided = headers.get(ANALYST_AUTH_HEADER, "").strip()
+    if not provided:
+        return False, 403, f"Missing {ANALYST_AUTH_HEADER} header"
+    if not secrets.compare_digest(provided, expected):
+        return False, 403, "Invalid analyst token"
+    return True, 200, "ok"
+
+
+def _get_ollama_host() -> str:
+    """Return a normalized Ollama host URL, restricted to localhost."""
+    raw_host = os.environ.get("OLLAMA_HOST", PROVIDER_DEFAULTS["ollama"]["host"]).strip()
+    parsed = urllib.parse.urlparse(raw_host)
+    if parsed.scheme != "http":
+        raise ValueError("OLLAMA_HOST must use http and stay localhost only")
+    if parsed.username or parsed.password:
+        raise ValueError("OLLAMA_HOST must not include userinfo")
+    if parsed.hostname not in LOCAL_ANALYST_HOSTS:
+        raise ValueError("OLLAMA_HOST must stay localhost only")
+    if parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
+        raise ValueError("OLLAMA_HOST must not include path, query, or fragment")
+    netloc = parsed.netloc.rstrip("/")
+    if not netloc:
+        raise ValueError("OLLAMA_HOST must include a host")
+    return f"http://{netloc}"
+
+
 def _analyst_available() -> tuple[bool, str]:
     """Check if the analyst is available. Returns (available, reason)."""
     provider = ANALYST_PROVIDER
     if provider == "ollama":
-        host = os.environ.get("OLLAMA_HOST", PROVIDER_DEFAULTS["ollama"]["host"]).rstrip("/")
+        try:
+            host = _get_ollama_host()
+        except ValueError as exc:
+            return False, str(exc)
         try:
             with urllib.request.urlopen(f"{host}/api/tags", timeout=2) as resp:
                 if resp.status < 200 or resp.status >= 300:
@@ -215,7 +261,7 @@ def _call_llm(system_prompt: str, user_content: str) -> str:
         return response.choices[0].message.content
 
     elif provider == "ollama":
-        host = os.environ.get("OLLAMA_HOST", PROVIDER_DEFAULTS["ollama"]["host"])
+        host = _get_ollama_host()
         url = f"{host}/api/chat"
         payload = json.dumps({
             "model": model,
@@ -294,12 +340,60 @@ def decode_event(hex_line: str) -> dict | None:
     }
 
 
-def read_log():
-    """Read event log. Returns (recent_events[], total_count, domain_counts{})."""
+def read_log_tail_lines(
+    path: str,
+    *,
+    max_bytes: int | None = None,
+    max_lines: int | None = None,
+):
+    """Read a bounded tail window from the event log.
+
+    Returns recent log lines only, newest still at the end of the list.
+    The first partial line is dropped when the read starts mid-file.
+    """
     try:
-        with open(LOG_PATH, "r") as f:
-            lines = f.readlines()
+        max_bytes = MAX_LOG_TAIL_BYTES if max_bytes is None else max_bytes
+        max_lines = MAX_LOG_TAIL_LINES if max_lines is None else max_lines
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            file_size = f.tell()
+            if file_size == 0:
+                return []
+
+            buffer = bytearray()
+            position = file_size
+            truncated_head = False
+
+            while position > 0 and len(buffer) < max_bytes and buffer.count(b"\n") <= max_lines:
+                chunk_size = min(8192, position, max_bytes - len(buffer))
+                if chunk_size <= 0:
+                    break
+                position -= chunk_size
+                f.seek(position)
+                chunk = f.read(chunk_size)
+                buffer[:0] = chunk
+                truncated_head = position > 0
+
+            text = buffer.decode("utf-8", errors="replace")
+            lines = text.splitlines()
+            if truncated_head and lines:
+                lines = lines[1:]
+            if len(lines) > max_lines:
+                lines = lines[-max_lines:]
+            return lines
     except (FileNotFoundError, PermissionError):
+        return []
+
+    return []
+
+
+def read_log():
+    """Read a bounded tail of the event log.
+
+    Returns (recent_events[], total_count_in_window, domain_counts_in_window{}).
+    """
+    lines = read_log_tail_lines(LOG_PATH)
+    if not lines:
         return [], 0, {}
 
     valid = [l for l in lines if extract_hex(l) is not None]
@@ -474,6 +568,9 @@ class DashboardHandler(BaseHTTPRequestHandler):
         available, reason = _analyst_available()
         self._json({
             "available": available,
+            "auth_required": True,
+            "auth_configured": bool(_get_analyst_shared_token()),
+            "auth_header": ANALYST_AUTH_HEADER,
             "provider": ANALYST_PROVIDER,
             "model": _get_analyst_model() if available else None,
             "reason": reason if not available else None,
@@ -481,6 +578,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
 
     def _serve_analyst(self):
         """AI Analyst endpoint — read-only decision interpreter (multi-provider)."""
+        authorized, status_code, reason = _authorize_analyst_request(self.headers)
+        if not authorized:
+            self._json_error(status_code, reason)
+            return
+
         # Rate limit
         client_ip = self.client_address[0]
         if not _check_rate_limit(client_ip):
