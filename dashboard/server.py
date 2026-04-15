@@ -174,8 +174,53 @@ def _get_analyst_shared_token() -> str:
     return os.environ.get("ANALYST_SHARED_TOKEN", "").strip()
 
 
+def _is_localhost_origin(value: str) -> bool:
+    """Return True when `value` (an Origin or Referer header) points at a
+    localhost-scoped origin. Used by `_authorize_analyst_request` to reject
+    cross-origin POSTs that a malicious web page might craft against the
+    user's dashboard via DNS rebinding or a local XSS pivot.
+
+    The check is deliberately port-agnostic: the browser's own CORS model
+    already treats a different port as a different origin and would not
+    forge the Origin header across that boundary. A locally-running
+    dev server on another port that legitimately wants to call the
+    analyst endpoint is still stopped at the shared-token layer (the
+    primary auth), so relaxing the port here keeps localhost integration
+    ergonomic without weakening the DNS-rebinding defence (which
+    depends entirely on the hostname check below).
+
+    Kimi audit finding M-3.
+    """
+    if not value:
+        return False
+    try:
+        parsed = urllib.parse.urlparse(value)
+    except ValueError:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if parsed.hostname not in LOCAL_ANALYST_HOSTS:
+        return False
+    return True
+
+
 def _authorize_analyst_request(headers) -> tuple[bool, int, str]:
-    """Validate the shared-token gate for the analyst endpoint."""
+    """Validate the shared-token gate for the analyst endpoint.
+
+    Two layers:
+
+    1. Shared-token (the primary auth): prevents any call from a caller
+       without the operator-configured `X-SLIME-Token`.
+    2. Cross-origin guard (Kimi audit finding M-3): even on the
+       localhost-only bind, a malicious remote site can attempt a
+       DNS-rebinding or local-XSS pivot to POST to `/api/analyst` from
+       the user's browser. We reject any request whose `Origin`/`Referer`
+       header resolves to something other than the dashboard itself.
+       `application/json` POSTs trigger a CORS preflight in real browsers,
+       so a rebound attacker who omits Origin cannot coerce the browser
+       into sending JSON here — but we still fail-closed on missing/
+       mismatched headers as defense in depth.
+    """
     expected = _get_analyst_shared_token()
     if not expected:
         return False, 503, "AI Analyst auth not configured"
@@ -185,6 +230,24 @@ def _authorize_analyst_request(headers) -> tuple[bool, int, str]:
         return False, 403, f"Missing {ANALYST_AUTH_HEADER} header"
     if not secrets.compare_digest(provided, expected):
         return False, 403, "Invalid analyst token"
+
+    # Cross-origin guard — accept either a matching Origin or (lacking
+    # that) a matching Referer. Reject outright when neither is present,
+    # so a non-browser client can still call the endpoint with the
+    # token as long as it sets one of the two headers to the dashboard
+    # URL. A legitimate first-party call from the dashboard HTML always
+    # carries Origin.
+    origin = headers.get("Origin", "").strip()
+    referer = headers.get("Referer", "").strip()
+    if origin:
+        if not _is_localhost_origin(origin):
+            return False, 403, "Cross-origin Origin header rejected"
+    elif referer:
+        if not _is_localhost_origin(referer):
+            return False, 403, "Cross-origin Referer header rejected"
+    else:
+        return False, 403, "Missing Origin/Referer header"
+
     return True, 200, "ok"
 
 
