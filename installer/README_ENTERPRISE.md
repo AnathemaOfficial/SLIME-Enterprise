@@ -12,6 +12,7 @@ If dashboard assets are present, it also installs:
 
 - `/opt/slime/dashboard/*`
 - `slime-dashboard.service`
+- optional `/etc/slime/dashboard.env` operator config for AI Analyst auth
 
 Properties:
 
@@ -24,6 +25,10 @@ Install:
 ```bash
 ./installer/install.sh
 ```
+
+If you enable the dashboard AI Analyst later, configure `/etc/slime/dashboard.env`
+with `ANALYST_SHARED_TOKEN` and a localhost-only `OLLAMA_HOST`, then restart
+`slime-dashboard.service`.
 
 Uninstall:
 

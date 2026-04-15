@@ -1,15 +1,21 @@
 [Unit]
-Description=SLIME External Actuator
+Description=SLIME actuator-min (reference) — owns /run/slime/egress.sock
 After=network.target
+Wants=network.target
 
 [Service]
 Type=simple
 User=actuator
 Group=slime-actuator
-ExecStart=/opt/slime/bin/actuator-binary
-Restart=no
 RuntimeDirectory=slime
-RuntimeDirectoryMode=0770
+RuntimeDirectoryMode=0755
+ExecStartPre=/bin/sh -c 'rm -f /run/slime/egress.sock'
+ExecStartPre=/usr/local/bin/fireplank-guard-boot.sh
+ExecStart=/usr/local/bin/actuator-min
+Restart=no
+NoNewPrivileges=yes
+StandardOutput=append:/var/log/slime-actuator/events.log
+StandardError=append:/var/log/slime-actuator/events.log
 
 [Install]
 WantedBy=multi-user.target

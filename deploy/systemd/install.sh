@@ -3,6 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$ROOT_DIR/systemd"
+DEPLOY_DIR="$(cd "$ROOT_DIR/.." && pwd)"
+BIN_DIR="/usr/local/bin"
+UNIT_DIR="/etc/systemd/system"
+SEAL_DIR="/usr/lib/slime"
+LOG_DIR="/var/log/slime-actuator"
+LEGACY_BIN_DIR="/opt/slime/bin"
 
 echo "[*] Installing systemd units from: $SRC_DIR"
 
@@ -22,35 +28,38 @@ fi
 usermod -aG slime-actuator actuator
 usermod -aG slime-actuator slime
 
-# --- binaries (Option A: auto-copy if present) ---
-mkdir -p /opt/slime/bin
+# --- binaries ---
+install -d -m 0755 "$BIN_DIR"
 
-if [ -x /usr/local/bin/slime-runner ] && [ ! -x /opt/slime/bin/slime-runner ]; then
-  install -m 0755 /usr/local/bin/slime-runner /opt/slime/bin/slime-runner
+if [ -x "$LEGACY_BIN_DIR/slime-runner" ] && [ ! -x "$BIN_DIR/slime-runner" ]; then
+  install -m 0755 "$LEGACY_BIN_DIR/slime-runner" "$BIN_DIR/slime-runner"
 fi
 
-if [ -x /usr/local/bin/actuator-binary ] && [ ! -x /opt/slime/bin/actuator-binary ]; then
-  install -m 0755 /usr/local/bin/actuator-binary /opt/slime/bin/actuator-binary
+if [ -x "$LEGACY_BIN_DIR/actuator-binary" ] && [ ! -x "$BIN_DIR/actuator-min" ]; then
+  install -m 0755 "$LEGACY_BIN_DIR/actuator-binary" "$BIN_DIR/actuator-min"
 fi
 
-# Fail if missing
-test -x /opt/slime/bin/slime-runner
-test -x /opt/slime/bin/actuator-binary
+test -x "$BIN_DIR/slime-runner"
+test -x "$BIN_DIR/actuator-min"
 
-# --- runtime dir (safe) ---
-mkdir -p /run/slime
-chown actuator:slime-actuator /run/slime
-chmod 0770 /run/slime
+# --- FirePlank scripts + seal ---
+install -m 0755 "$DEPLOY_DIR/fireplank-guard-boot.sh" "$BIN_DIR/fireplank-guard-boot.sh"
+install -m 0755 "$DEPLOY_DIR/generate-seal.sh" "$BIN_DIR/generate-seal.sh"
+install -d -m 0750 -o root -g slime-actuator "$SEAL_DIR"
+"$BIN_DIR/generate-seal.sh"
+
+# --- log dir ---
+install -d -m 0755 "$LOG_DIR"
+chown actuator:slime-actuator "$LOG_DIR"
 
 # --- install units ---
-install -m 0644 "$SRC_DIR/actuator.service" /etc/systemd/system/actuator.service
-install -m 0644 "$SRC_DIR/slime.service"    /etc/systemd/system/slime.service
+install -m 0644 "$SRC_DIR/actuator.service" "$UNIT_DIR/actuator.service"
+install -m 0644 "$SRC_DIR/slime.service"    "$UNIT_DIR/slime.service"
 
-mkdir -p /etc/systemd/system/actuator.service.d
-install -m 0644 "$SRC_DIR/actuator.service.d/override.conf" /etc/systemd/system/actuator.service.d/override.conf
-
-mkdir -p /etc/systemd/system/slime.service.d
-install -m 0644 "$SRC_DIR/slime.service.d/override.conf" /etc/systemd/system/slime.service.d/override.conf
+install -d -m 0755 "$UNIT_DIR/actuator.service.d"
+install -d -m 0755 "$UNIT_DIR/slime.service.d"
+install -m 0644 "$ROOT_DIR/fp4-hardening-actuator.conf" "$UNIT_DIR/actuator.service.d/fp4-hardening.conf"
+install -m 0644 "$ROOT_DIR/fp4-hardening-slime.conf" "$UNIT_DIR/slime.service.d/fp4-hardening.conf"
 
 # --- reload + enable + restart ---
 systemctl daemon-reload
@@ -60,5 +69,5 @@ systemctl restart actuator.service
 systemctl restart slime.service
 
 echo "[*] Done."
-systemctl status actuator --no-pager || true
-systemctl status slime --no-pager || true
+systemctl status actuator.service --no-pager || true
+systemctl status slime.service --no-pager || true
