@@ -57,6 +57,23 @@ SYSTEMCTL_BIN = shutil.which("systemctl") or "/usr/bin/systemctl"
 # Configuration
 # ---------------------------------------------------------------------------
 
+# Trust model (Copilot audit finding C-2):
+#
+# The dashboard binds to 127.0.0.1 only. The `/api/analyst` endpoint is
+# additionally gated by a shared X-SLIME-Token header (see
+# `_authorize_analyst_request`) because it spends external LLM credits
+# and exposes the full live system context, but the main dashboard
+# HTML/status routes are intentionally UNAUTHENTICATED within this
+# localhost-only trust boundary: any process able to reach 127.0.0.1:8081
+# already has the permissions of a local user on the appliance host, so
+# adding a second auth layer on read-only observation endpoints would
+# only protect against another process running under the same uid —
+# which is not a threat model this dashboard is designed to mitigate.
+#
+# If the dashboard is ever moved off 127.0.0.1 (reverse proxy exposure,
+# SSH tunnel sharing, 0.0.0.0 bind), ALL routes MUST be token-gated —
+# not only /api/analyst. The current design relies on the kernel's
+# localhost binding for route-level authentication.
 HOST = "127.0.0.1"
 PORT = 8081
 LOG_PATH = "/var/log/slime-actuator/events.log"

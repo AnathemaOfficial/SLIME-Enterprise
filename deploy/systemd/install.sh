@@ -17,14 +17,23 @@ if ! getent group slime-actuator >/dev/null; then
   groupadd slime-actuator
 fi
 
+# Copilot audit finding H-1: the prior user-creation flow used
+# `--create-home` (unnecessary attack surface for a system service) and
+# omitted `-g slime-actuator`, so the primary group defaulted to a new
+# per-user private group and the slime-actuator group-based permissions
+# on /run/slime + seal dir + log dir only worked via the supplementary
+# `usermod -aG` below. Aligned with installer/install.sh: explicit
+# primary group, no home directory.
 if ! id -u actuator >/dev/null 2>&1; then
-  useradd --system --create-home --shell /usr/sbin/nologin actuator
+  useradd --system --no-create-home --shell /usr/sbin/nologin -g slime-actuator actuator
 fi
 
 if ! id -u slime >/dev/null 2>&1; then
-  useradd --system --create-home --shell /usr/sbin/nologin slime
+  useradd --system --no-create-home --shell /usr/sbin/nologin -g slime-actuator slime
 fi
 
+# Keep the supplementary-group assignment defensively — idempotent with
+# or without a correct primary group.
 usermod -aG slime-actuator actuator
 usermod -aG slime-actuator slime
 

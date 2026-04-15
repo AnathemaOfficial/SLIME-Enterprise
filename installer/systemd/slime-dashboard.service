@@ -23,6 +23,13 @@ RestrictAddressFamilies=AF_INET AF_UNIX
 RestrictNamespaces=yes
 RestrictRealtime=yes
 ReadOnlyPaths=/var/log/slime-actuator /usr/lib/slime
+# Copilot audit finding H-3: drop all capabilities. The dashboard is a
+# stdlib HTTP server that only reads local files and makes outbound HTTP
+# calls to a validated Ollama host; it needs no POSIX capabilities.
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=yes
+SystemCallFilter=@system-service
 
 [Install]
 WantedBy=multi-user.target

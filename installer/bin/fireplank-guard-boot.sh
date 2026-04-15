@@ -9,7 +9,7 @@ SEAL_FILE="${SEAL_FILE:-/usr/lib/slime/fireplank.seal}"
 ACTUATOR_BIN="${ACTUATOR_BIN:-/usr/local/bin/actuator-min}"
 RUNNER_BIN="${RUNNER_BIN:-/usr/local/bin/slime-runner}"
 SOCK_DIR="${SOCK_DIR:-/run/slime}"
-EXPECTED_SOCK_PERMS="${EXPECTED_SOCK_PERMS:-755}"
+EXPECTED_SOCK_PERMS="${EXPECTED_SOCK_PERMS:-750}"
 
 die() {
     echo "FIREPLANK: $1" >&2

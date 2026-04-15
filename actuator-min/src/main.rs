@@ -160,6 +160,12 @@ fn format_frame_line(frame: &[u8; 32]) -> String {
 
 struct ReplayJournal {
     file: File,
+    /// Canonical path kept so `rewrite_file` can do an atomic temp-file +
+    /// rename rather than an in-place truncate. Closes Copilot audit
+    /// finding H-2: the prior `set_len(0)` + in-place rewrite lost the
+    /// full journal on crash between `set_len(0)` and `sync_data`,
+    /// allowing replay of every previously-seen token on recovery.
+    path: PathBuf,
     seen_tokens: HashSet<u128>,
     order: VecDeque<u128>,
     max_entries: usize,
@@ -189,6 +195,7 @@ impl ReplayJournal {
 
         let mut journal = Self {
             file,
+            path: path.to_path_buf(),
             seen_tokens,
             order,
             max_entries,
@@ -240,14 +247,41 @@ impl ReplayJournal {
     }
 
     fn rewrite_file(&mut self) -> io::Result<()> {
-        self.file.set_len(0)?;
-        self.file.seek(SeekFrom::Start(0))?;
-        for token in &self.order {
-            self.file.write_all(&token.to_le_bytes())?;
+        // Copilot audit finding H-2: atomic rewrite via temp + rename.
+        // Previously the journal was truncated with `set_len(0)` and then
+        // rewritten in place — a crash between the truncate and the final
+        // `sync_data` left an empty journal on disk, so on the next boot
+        // every previously-seen replay token could be re-accepted.
+        //
+        // We now write the full new journal to a temp file, fsync it, and
+        // atomically rename it over the canonical path. POSIX `rename`
+        // on the same filesystem is atomic: the journal always points
+        // to either the fully-written new content or the untouched old
+        // content, never to a zero-length transient state.
+        let tmp_path = self.path.with_extension("bin.tmp");
+        // Best-effort removal of a stale tmp from a prior crash.
+        let _ = fs::remove_file(&tmp_path);
+        {
+            let mut tmp_file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp_path)?;
+            for token in &self.order {
+                tmp_file.write_all(&token.to_le_bytes())?;
+            }
+            tmp_file.flush()?;
+            tmp_file.sync_data()?;
         }
-        self.file.flush()?;
-        self.file.sync_data()?;
-        self.file.seek(SeekFrom::End(0))?;
+        #[cfg(unix)]
+        set_mode(&tmp_path, 0o640)?;
+        fs::rename(&tmp_path, &self.path)?;
+        // The rename replaced the inode we held open — re-open to track
+        // the live file and restore the append position for later writes.
+        self.file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(false)
+            .open(&self.path)?;
         Ok(())
     }
 }
