@@ -5,6 +5,13 @@
 
 set -eu
 
+# MiniMax audit finding MED-02: unset tunables before resolving defaults
+# so that an external caller (cron, shell login, operator wrapper)
+# cannot redirect the integrity check to attacker-controlled paths via
+# environment variables. The default systemd units never set these, so
+# in the normal path this is defense-in-depth only.
+unset SEAL_FILE ACTUATOR_BIN RUNNER_BIN SOCK_DIR EXPECTED_SOCK_PERMS
+
 SEAL_FILE="${SEAL_FILE:-/usr/lib/slime/fireplank.seal}"
 ACTUATOR_BIN="${ACTUATOR_BIN:-/usr/local/bin/actuator-min}"
 RUNNER_BIN="${RUNNER_BIN:-/usr/local/bin/slime-runner}"

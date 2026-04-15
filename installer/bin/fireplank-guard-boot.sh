@@ -5,6 +5,17 @@
 
 set -eu
 
+# MiniMax audit finding MED-02: the default systemd units never pass
+# these variables via Environment= or EnvironmentFile=, so in the
+# normal boot path there is no environment override to worry about.
+# But if the guard is ever invoked from another wrapper (cron, shell
+# login, operator debug script), a populated environment could redirect
+# the integrity check at /usr/lib/slime/fireplank.seal to a different
+# path the attacker controls. Explicitly unset the tunables so only
+# the hard-coded defaults below are ever honoured, regardless of the
+# caller's environment.
+unset SEAL_FILE ACTUATOR_BIN RUNNER_BIN SOCK_DIR EXPECTED_SOCK_PERMS
+
 SEAL_FILE="${SEAL_FILE:-/usr/lib/slime/fireplank.seal}"
 ACTUATOR_BIN="${ACTUATOR_BIN:-/usr/local/bin/actuator-min}"
 RUNNER_BIN="${RUNNER_BIN:-/usr/local/bin/slime-runner}"
