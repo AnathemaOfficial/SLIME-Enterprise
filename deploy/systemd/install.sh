@@ -58,7 +58,11 @@ install -d -m 0750 -o root -g slime-actuator "$SEAL_DIR"
 "$BIN_DIR/generate-seal.sh"
 
 # --- log dir ---
-install -d -m 0755 "$LOG_DIR"
+# MiniMax audit finding MED-01: log directory now 0750 (group-read for
+# slime-actuator members, no world-read). Actuator event logs contain
+# operational frame history — no secret data, but no reason to be
+# world-readable either. Aligned with installer/ path expectations.
+install -d -m 0750 "$LOG_DIR"
 chown actuator:slime-actuator "$LOG_DIR"
 
 # --- install units ---

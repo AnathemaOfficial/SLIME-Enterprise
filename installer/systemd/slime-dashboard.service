@@ -23,6 +23,13 @@ RestrictAddressFamilies=AF_INET AF_UNIX
 RestrictNamespaces=yes
 RestrictRealtime=yes
 ReadOnlyPaths=/var/log/slime-actuator /usr/lib/slime
+# MiniMax audit finding MED-03: apply MemoryDenyWriteExecute uniformly
+# across all three services (actuator and runner already have it via
+# their fp4-hardening drop-ins). Python interpreters don't benefit from
+# W^X the same way AOT-compiled code does, but consistent hardening
+# makes the appliance surface easier to reason about and blocks any
+# future JIT-enabled Python extension from introducing W+X mappings.
+MemoryDenyWriteExecute=yes
 # Copilot audit finding H-3: drop all capabilities. The dashboard is a
 # stdlib HTTP server that only reads local files and makes outbound HTTP
 # calls to a validated Ollama host; it needs no POSIX capabilities.
