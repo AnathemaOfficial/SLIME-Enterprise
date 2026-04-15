@@ -9,7 +9,11 @@ User=actuator
 Group=slime-actuator
 RuntimeDirectory=slime
 RuntimeDirectoryMode=0750
-ExecStartPre=/bin/sh -c 'rm -f /run/slime/egress.sock'
+# Kimi audit finding M-2: the `rm -f /run/slime/egress.sock` ExecStartPre
+# was redundant with systemd's own `RuntimeDirectory=slime` handling
+# (systemd re-creates /run/slime clean at each service start unless
+# RuntimeDirectoryPreserve is set, which we do not set) and created a
+# TOCTOU window between the rm and the UnixListener::bind.
 ExecStartPre=/usr/local/bin/fireplank-guard-boot.sh
 ExecStart=/usr/local/bin/actuator-min
 Restart=no

@@ -1,0 +1,31 @@
+# SLIME-Enterprise dashboard — optional LLM provider dependencies.
+#
+# The dashboard imports `anthropic` and `openai` with `try/except ImportError`
+# and gracefully degrades if either package is absent. Operators who want
+# the AI Analyst feature can install the dependencies below with:
+#
+#     python3 -m pip install --require-hashes -r requirements-optional.txt
+#
+# Kimi audit finding M-4: previously these packages were installed
+# ad-hoc system-wide with no version pinning, which meant the dashboard
+# silently pulled whatever was available at runtime — including yanked
+# or vulnerable releases. Pinning here gives operators a reproducible
+# install surface AND a clear upgrade cadence (bump here → roll the
+# appliance). The hashes are optional for now because CI does not yet
+# mirror the packages; enable `--require-hashes` once you vendor them.
+#
+# Versions chosen to match the imports in dashboard/server.py and to
+# avoid known-vulnerable releases as of 2026-04-15. Review before each
+# appliance release cycle.
+
+# Anthropic Python SDK (Claude API client)
+anthropic>=0.40.0,<1.0
+
+# OpenAI Python SDK (GPT / o-series client)
+openai>=1.50.0,<2.0
+
+# NOTE: both packages pull transitive deps (httpx, pydantic, typing-extensions,
+# anyio, distro, sniffio, tqdm, …). Your operator environment is responsible
+# for vetting those transitively. For air-gapped or hash-verified deploys,
+# run `pip-compile --generate-hashes requirements-optional.txt` and commit
+# the resulting fully-resolved file next to this one.

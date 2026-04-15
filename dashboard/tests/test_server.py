@@ -39,14 +39,26 @@ def running_server():
 
 
 def request_json(method: str, path: str, body=None, headers=None):
-    payload = None
+    """Issue a request against a freshly-bound dashboard server.
+
+    The helper auto-injects an `Origin` header pointing at the
+    dashboard's own listen port so that every existing test keeps
+    passing after the cross-origin guard landed (Kimi audit finding
+    M-3). Tests that want to exercise the cross-origin rejection
+    path can pass `headers={"Origin": "http://attacker.example/"}`
+    or `headers={"__omit_origin__": True}` to suppress the injection.
+    """
     request_headers = dict(headers or {})
+    omit_origin = request_headers.pop("__omit_origin__", False)
     request_headers.setdefault("Connection", "close")
+    payload = None
     if body is not None:
         payload = json.dumps(body)
         request_headers["Content-Type"] = "application/json"
 
     with running_server() as port:
+        if not omit_origin and "Origin" not in request_headers:
+            request_headers["Origin"] = f"http://127.0.0.1:{port}"
         conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
         conn.request(method, path, body=payload, headers=request_headers)
         response = conn.getresponse()
@@ -264,6 +276,37 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertIn(server.ANALYST_AUTH_HEADER, body["error"])
 
+    # Kimi audit finding M-3: CSRF / cross-origin rejection.
+    def test_analyst_post_rejects_missing_origin_and_referer(self):
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True):
+            status, body = request_json(
+                "POST",
+                "/api/analyst",
+                {"message": "hello"},
+                headers={
+                    server.ANALYST_AUTH_HEADER: "secret",
+                    "__omit_origin__": True,
+                },
+            )
+
+        self.assertEqual(status, 403)
+        self.assertIn("Origin/Referer", body["error"])
+
+    def test_analyst_post_rejects_cross_origin(self):
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True):
+            status, body = request_json(
+                "POST",
+                "/api/analyst",
+                {"message": "hello"},
+                headers={
+                    server.ANALYST_AUTH_HEADER: "secret",
+                    "Origin": "http://attacker.example/",
+                },
+            )
+
+        self.assertEqual(status, 403)
+        self.assertIn("Cross-origin", body["error"])
+
     def test_analyst_post_rejects_invalid_token(self):
         with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True):
             status, body = request_json(
@@ -317,6 +360,10 @@ class HandlerTests(unittest.TestCase):
                     "Content-Type": "application/json",
                     "Connection": "close",
                     server.ANALYST_AUTH_HEADER: "secret",
+                    # Kimi audit M-3: pass a first-party Origin so the
+                    # cross-origin guard in _authorize_analyst_request
+                    # does not 403 before the JSON parser runs.
+                    "Origin": f"http://127.0.0.1:{port}",
                 },
             )
             response = conn.getresponse()
