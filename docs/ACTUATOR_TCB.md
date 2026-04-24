@@ -53,23 +53,51 @@ Applied to the actuator, FirePlank becomes an **integrity floor**: a set of non-
 
 ### FP-1: Integrity Floor (Boot Verification)
 
-Before the actuator starts, verify its identity:
+Before the actuator starts, the boot guard verifies:
 
 ```
-sha256(actuator-binary) == SEALED_HASH
-sha256(domain-registry) == SEALED_REGISTRY_HASH
-socket permissions == 0660
-socket owner == actuator:slime-actuator
+sha256(actuator-binary) == SEALED_ACTUATOR_HASH
+sha256(runner-binary)   == SEALED_RUNNER_HASH
+/run/slime directory permissions == expected (0750)
 ```
 
 **If any mismatch:** actuator does not start. Fail-closed.
 
-This addresses the **toolchain compromise** risk identified in V1_INVARIANTS (explicitly out of SLIME's threat model, but within FirePlank-Guard's scope).
+> **Codex adversarial audit clarification (2026-04-15):**
+> Earlier revisions of this document described a third check,
+> `sha256(domain-registry) == SEALED_REGISTRY_HASH`, plus two
+> invariants "FP-I2" and "FP-I3" that promised a domain-registry
+> collision check at boot. **That machinery does not exist in the
+> current implementation.** The live seal contains only
+> `ACTUATOR_BIN_HASH` and `RUNNER_BIN_HASH`, the guard parses only
+> those two entries (`installer/bin/fireplank-guard-boot.sh`), and
+> the adversarial test `adversarial/phase4/T07_domain_collision.sh`
+> explicitly skips because no sealed registry is present. Implementing
+> a sealed domain registry is a deliberate future phase; this document
+> now says so honestly rather than describing it as already shipped.
+
+This guard addresses the **toolchain compromise** risk identified in V1_INVARIANTS (explicitly out of SLIME's threat model, but within FirePlank-Guard's scope).
 
 **Implementation:**
 
 Sealed hashes live in a **read-only file**, not in the script itself.
 If the script contained the hashes, an attacker who modifies the script could also change the expected values.
+
+> **Trust-boundary note (Codex + Ana adversarial audit, 2026-04-15):**
+> The seal covers the two **binaries**, not the machinery that decides
+> whether those hashes mean anything. Specifically, neither
+> `/usr/local/bin/fireplank-guard-boot.sh` nor
+> `/usr/local/bin/generate-seal.sh` is itself in the seal, and both
+> live with mode `0755` owned by `root`. A local actor with root
+> (or an attacker who has compromised the installer's execution
+> environment) can bypass the entire chain in two documented ways:
+> (A) replace the guard script with a no-op that prints "integrity OK";
+> (B) replace the binaries and re-run the generator, which blesses
+> the new binaries because sealing happens post-install. The
+> attested object is therefore "whatever root last sealed", not
+> "what the appliance originally shipped". An operator who needs a
+> build-time trust anchor should move to a signed-artifact model
+> (GPG or sigstore on the seal itself) before field deployment.
 
 **Seal file:** `/usr/lib/slime/fireplank.seal` (owned by `root:slime-actuator`, permissions `0440`)
 ```
@@ -129,12 +157,20 @@ Prevent the same 32-byte frame from being executed twice:
 
 **Note:** This does not modify SLIME. The anti-replay lives entirely within the actuator's execution boundary.
 
-### FP-3: Domain Collision Floor (Registry Verification)
+### FP-3: Domain Collision Floor (Registry Verification)  —  **NOT YET IMPLEMENTED**
+
+> **Codex adversarial audit (2026-04-15):** this section describes
+> a future phase, not current behaviour. The live seal contains
+> **no** domain registry, the live guard parses **no** domain
+> registry, and `adversarial/phase4/T07_domain_collision.sh`
+> explicitly skips because no sealed registry is present. The design
+> below is preserved so the implementation work is traceable; operators
+> MUST NOT rely on a domain-collision check happening at boot today.
 
 Canon normalizes domains via `hash64(domain) & 0xFFFFFFFF` (32-bit mask).
 This creates a non-negligible collision probability at scale.
 
-FirePlank-Guard mitigates this:
+**Planned** FirePlank-Guard mitigation (not shipped):
 
 - **Sealed domain registry:** static mapping `domain_id → action_name`, verified at boot
 - **Collision check at boot:** if any two distinct domains produce the same `domain_id`, abort
@@ -149,7 +185,7 @@ FirePlank-Guard mitigates this:
 }
 ```
 
-**Boot check:** iterate all pairs, verify no `domain_id` collision. If collision detected: fail-closed, actuator does not start.
+**Planned boot check:** iterate all pairs, verify no `domain_id` collision. If collision detected: fail-closed, actuator does not start. Until this ships, collision risk lives in the operator's domain-naming discipline.
 
 ### FP-4: Privilege Reduction (Sandboxed Execution)
 
@@ -185,14 +221,20 @@ MemoryDenyWriteExecute=yes
 
 ## FirePlank-Guard Invariants
 
-| ID | Invariant | Violation Response |
-|---|---|---|
-| FP-I1 | Actuator binary hash matches sealed value | Abort (fail-closed) |
-| FP-I2 | Domain registry hash matches sealed value | Abort (fail-closed) |
-| FP-I3 | No domain_id collision exists in registry | Abort (fail-closed) |
-| FP-I4 | No actuation_token is executed twice | Drop frame (silent) |
-| FP-I5 | Journal integrity is verifiable | Actuator enters sealed state (no execution until restored + restarted) |
-| FP-I6 | Actuator runs with minimal privileges | Enforced by systemd |
+Codex adversarial audit (2026-04-15): the "Implemented?" column was
+added so the invariant list stops overstating enforcement. An invariant
+listed as ⏳ is a *future* guarantee; operators must not rely on it in
+deployments cut from this tree today.
+
+| ID | Invariant | Violation Response | Implemented? |
+|---|---|---|---|
+| FP-I1 | Actuator binary hash matches sealed value | Abort (fail-closed) | ✅ `installer/bin/fireplank-guard-boot.sh` |
+| FP-I1b | Runner binary hash matches sealed value | Abort (fail-closed) | ✅ same guard |
+| FP-I2 | Domain registry hash matches sealed value | Abort (fail-closed) | ⏳ **NOT SHIPPED** — no registry in seal, no code path |
+| FP-I3 | No domain_id collision exists in registry | Abort (fail-closed) | ⏳ **NOT SHIPPED** — `adversarial/phase4/T07_domain_collision.sh` skips for this reason |
+| FP-I4 | No actuation_token is executed twice | Drop frame (silent) | ✅ `actuator-min` replay journal |
+| FP-I5 | Journal integrity is verifiable | Actuator enters sealed state (no execution until restored + restarted) | ✅ atomic rewrite via temp + rename |
+| FP-I6 | Actuator runs with minimal privileges | Enforced by systemd | ✅ `fp4-hardening-*.conf` drop-ins |
 
 ---
 

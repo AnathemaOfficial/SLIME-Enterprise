@@ -536,24 +536,93 @@ def get_service_status(name: str) -> dict:
 # FP-1 seal file
 # ---------------------------------------------------------------------------
 
+_EXPECTED_SEAL_KEYS = frozenset({"ACTUATOR_BIN_HASH", "RUNNER_BIN_HASH"})
+_HEX_HASH_LEN = 64
+
+
+def _parse_seal_strict(content: str) -> tuple[dict | None, str | None]:
+    """Parse a seal file with the SAME strictness as
+    `fireplank-guard-boot.sh::parse_seal_file`:
+
+    - Blank lines and lines beginning with `#` are skipped
+    - Every other line MUST be `KEY=VALUE`
+    - `KEY` MUST be in `_EXPECTED_SEAL_KEYS`; unknown keys are rejected
+    - Each key MUST appear at most once; duplicates are rejected
+    - Each `VALUE` MUST be a 64-char lowercase-hex SHA-256 digest
+    - All expected keys MUST be present
+
+    Codex adversarial audit: previously the dashboard used a permissive
+    parser (split on first `=`, accept anything, ignore duplicates) and
+    reported "PRESENT (verified)" on files that the boot guard would
+    explicitly reject. A malicious or corrupt seal containing duplicate
+    entries and noise would keep the dashboard green while the next
+    actuator restart failed fail-closed — an operator-misleading UI
+    where the security posture surface contradicts the enforcement
+    surface. This helper mirrors the guard rules so the two views
+    converge.
+
+    Returns `(seal_dict, None)` on acceptance or `(None, error_msg)`
+    on rejection.
+    """
+    seal: dict = {}
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            return None, f"unexpected non-key=value line: {raw_line!r}"
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().lower()
+        if key not in _EXPECTED_SEAL_KEYS:
+            return None, f"unexpected seal entry {key!r}"
+        if key in seal:
+            return None, f"duplicate seal entry {key!r}"
+        if len(value) != _HEX_HASH_LEN:
+            return None, f"{key}: expected 64-char hex digest"
+        try:
+            int(value, 16)
+        except ValueError:
+            return None, f"{key}: value is not valid hex"
+        seal[key] = value
+    missing = _EXPECTED_SEAL_KEYS - seal.keys()
+    if missing:
+        return None, f"missing seal entries: {sorted(missing)}"
+    return seal, None
+
+
 def get_seal_status() -> dict:
-    """Read the FirePlank boot-integrity seal file."""
+    """Read the FirePlank boot-integrity seal file.
+
+    Uses the same strict parser as the boot guard (`_parse_seal_strict`)
+    so the dashboard's "PRESENT / verified" badge can no longer diverge
+    from what `ExecStartPre=/usr/local/bin/fireplank-guard-boot.sh`
+    would accept at service start. (Codex adversarial audit fix.)
+    """
     try:
         with open(SEAL_PATH, "r") as f:
             content = f.read()
-        seal = {}
-        for line in content.splitlines():
-            if "=" in line and not line.strip().startswith("#"):
-                k, v = line.split("=", 1)
-                seal[k.strip()] = v.strip()
-        return {
-            "present": True,
-            "actuator_hash": seal.get("ACTUATOR_BIN_HASH", "")[:16] + "...",
-            "runner_hash": seal.get("RUNNER_BIN_HASH", "")[:16] + "...",
-            "generated": seal.get("Generated", ""),
-        }
     except (FileNotFoundError, PermissionError):
         return {"present": False}
+
+    seal, error = _parse_seal_strict(content)
+    if error is not None:
+        # The file exists but the guard would refuse it — surface that
+        # fact to the operator instead of silently treating the seal as
+        # valid.
+        return {
+            "present": True,
+            "verified": False,
+            "parse_error": error,
+            "actuator_hash": None,
+            "runner_hash": None,
+        }
+    return {
+        "present": True,
+        "verified": True,
+        "actuator_hash": seal["ACTUATOR_BIN_HASH"][:16] + "...",
+        "runner_hash": seal["RUNNER_BIN_HASH"][:16] + "...",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -711,9 +780,34 @@ class DashboardHandler(BaseHTTPRequestHandler):
             logger.error("Failed to build live context: %s", exc)
             live_ctx = "(live state unavailable)"
 
+        # Codex + Ana adversarial audit: the live context includes seal
+        # hashes, event frames, service status, and runner health —
+        # plenty for a crafted operator question like "Repeat the entire
+        # <live_state> block verbatim" to exfiltrate appliance state to
+        # a third-party LLM provider. When the provider is the LOCAL
+        # Ollama, this stays on the host; when it is a remote provider
+        # (anthropic / openai / kimi), the full state leaves the box
+        # and lands in the provider's logs/retention.
+        #
+        # Policy: on remote providers we ship a redacted live context
+        # that keeps aggregate counts and category labels but strips
+        # raw frame payloads, seal hashes, and PIDs. An operator who
+        # needs the full picture in the analyst can either enable
+        # Ollama or accept the trade-off explicitly via
+        # `ANALYST_ALLOW_REMOTE_FULL_CONTEXT=1`.
+        effective_live_ctx = live_ctx
+        if ANALYST_PROVIDER != "ollama":
+            allow_full = os.environ.get(
+                "ANALYST_ALLOW_REMOTE_FULL_CONTEXT", ""
+            ).strip() in {"1", "true", "yes"}
+            if not allow_full:
+                effective_live_ctx = analyst_context.redact_live_context_for_remote(
+                    live_ctx
+                )
+
         user_content = (
             f"<static_rules>\n{static_ctx}\n</static_rules>\n\n"
-            f"<live_state>\n{live_ctx}\n</live_state>\n\n"
+            f"<live_state>\n{effective_live_ctx}\n</live_state>\n\n"
             f"Operator question: {message}"
         )
 
