@@ -4,7 +4,7 @@
 
 **Sealed law-layer execution appliance**
 
-Open-source enterprise appliance by SYFCORP.
+Open-source enterprise appliance by Technologies CoreXalt Inc.
 
 ## Contents
 
