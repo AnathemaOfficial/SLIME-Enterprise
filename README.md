@@ -4,7 +4,22 @@
 
 **Sealed law-layer execution appliance**
 
-Open-source enterprise appliance by Technologies CoreXalt Inc.
+Controlled enterprise appliance by Technologies CoreXalt Inc.
+
+## Controlled Product Layer
+
+SLIME-Enterprise is an **applied product layer** built from the public CoreXalt
+engine lineage:
+
+```text
+SYF-Core -> SYF-Gate -> SYF-Shield -> Anathema-Breaker -> SLIME-Core
+```
+
+The public engines remain open as the inspectable law and audit surface.
+SLIME-Enterprise is a deployable appliance assembly derived from those engines.
+Professional, enterprise, or government deployments should use sealed product
+editions with controlled access, signed releases, SBOM/provenance, and a frozen
+audited baseline.
 
 ## Contents
 
