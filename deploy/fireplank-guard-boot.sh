@@ -76,6 +76,14 @@ hash_file() {
 # Seal file must exist and be readable
 [ -r "$SEAL_FILE" ] || die "seal file missing or unreadable"
 
+SEAL_OWNER=$(stat -c '%U' "$SEAL_FILE") || die "cannot stat seal file owner"
+SEAL_FPERMS=$(stat -c '%a' "$SEAL_FILE") || die "cannot stat seal file permissions"
+[ "$SEAL_OWNER" = "root" ] || die "seal file not owned by root: $SEAL_OWNER"
+case "$SEAL_FPERMS" in
+    440|400|640|600) ;; # acceptable restrictive permissions
+    *) die "seal file has unexpected permissions: $SEAL_FPERMS" ;;
+esac
+
 parse_seal_file
 
 # Verify actuator binary
@@ -96,7 +104,7 @@ fi
 
 # Verify socket directory permissions
 if [ -d "$SOCK_DIR" ]; then
-    SOCK_PERMS=$(stat -c '%a' "$SOCK_DIR" 2>/dev/null || true)
+    SOCK_PERMS=$(stat -c '%a' "$SOCK_DIR") || die "cannot stat socket directory: $SOCK_DIR"
     if [ "$SOCK_PERMS" != "$EXPECTED_SOCK_PERMS" ]; then
         die "socket directory permissions unexpected: $SOCK_PERMS"
     fi

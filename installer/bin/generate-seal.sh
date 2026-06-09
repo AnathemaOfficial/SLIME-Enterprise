@@ -28,7 +28,8 @@ install -d -m "$SEAL_DIR_MODE" -o "$SEAL_OWNER" -g "$SEAL_GROUP" "$SEAL_DIR"
 
 ACTUATOR_HASH=$(hash_file "$ACTUATOR_BIN")
 RUNNER_HASH=$(hash_file "$RUNNER_BIN")
-TMP_SEAL=$(mktemp)
+umask 077
+TMP_SEAL=$(mktemp -p "$SEAL_DIR" .seal.XXXXXXXXXX)
 trap 'rm -f "$TMP_SEAL"' EXIT HUP INT TERM
 
 cat > "$TMP_SEAL" << EOF

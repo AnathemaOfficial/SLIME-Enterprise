@@ -6,6 +6,10 @@ echo "[T05] flood requests"
 EVENTS_LOG="${EVENTS_LOG:-/var/log/slime-actuator/events.log}"
 SLIME_ADDR="${SLIME_ADDR:-http://127.0.0.1:8080}"
 N="${N:-200}"
+if [ "$N" -gt 10000 ]; then
+    echo "N=$N exceeds maximum (10000)" >&2
+    exit 1
+fi
 
 count_events() {
   [ -f "$EVENTS_LOG" ] && wc -l < "$EVENTS_LOG" || echo 0

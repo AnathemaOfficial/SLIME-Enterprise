@@ -9,7 +9,12 @@ Read-only by construction. No write operations. No feedback into SLIME.
 """
 
 import json
+import logging
+import re
+
 import analyst_rules as rules
+
+logger = logging.getLogger("slime-dashboard")
 
 
 def build_static_context() -> str:
@@ -79,7 +84,8 @@ def build_live_context(read_log_fn, get_service_status_fn,
                 parts.append(f"  ... and {len(events) - 20} more recent events")
         else:
             parts.append("No events recorded yet.")
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to gather %s: %s", "events", exc)
         parts.append("## Events\n(unavailable)")
 
     # Services
@@ -91,7 +97,8 @@ def build_live_context(read_log_fn, get_service_status_fn,
                 f"  {svc['name']}: {svc['active']} "
                 f"(PID={svc['pid']}, since={svc['since']})"
             )
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to gather %s: %s", "service status", exc)
         parts.append("\n## Service Status\n(unavailable)")
 
     # Seal status — honest about what the dashboard can and cannot
@@ -128,7 +135,8 @@ def build_live_context(read_log_fn, get_service_status_fn,
                 "  WARNING: the next actuator restart will fail-closed. "
                 "This is a live integrity break."
             )
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to gather %s: %s", "seal status", exc)
         parts.append("\n## FP-1 Seal\n(unavailable)")
 
     # Runner health
@@ -141,7 +149,8 @@ def build_live_context(read_log_fn, get_service_status_fn,
             parts.append(f"  Status: UNREACHABLE")
             if runner.get("error"):
                 parts.append(f"  Error: {runner['error']}")
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to gather %s: %s", "runner health", exc)
         parts.append("\n## Runner Health\n(unavailable)")
 
     return "\n".join(parts)
@@ -176,8 +185,7 @@ def redact_live_context_for_remote(live_ctx: str) -> str:
             redacted.append(f"{indent}{key}: <redacted>")
             continue
         if "PID=" in raw_line:
-            import re as _re
-            redacted.append(_re.sub(r"PID=\d+", "PID=<redacted>", raw_line))
+            redacted.append(re.sub(r"PID=\d+", "PID=<redacted>", raw_line))
             continue
         redacted.append(raw_line)
     redacted.append("\n(Remote provider: some fields redacted. "

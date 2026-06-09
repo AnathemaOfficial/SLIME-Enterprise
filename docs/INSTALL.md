@@ -5,6 +5,7 @@
 - Ubuntu Server 22.04+ or Debian 12+
 - systemd
 - sudo access
+- Python 3.10+ (the dashboard requires Python 3.10+ due to type annotation syntax; Python 3.7+ is sufficient if `from __future__ import annotations` is added)
 
 ## Install
 

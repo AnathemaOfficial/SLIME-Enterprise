@@ -40,12 +40,14 @@ if [ -f "$REGISTRY" ]; then
 
     # Parse registry JSON: extract domain_id values, check for duplicates,
     # and report which domains collide if any.
-    RESULT=$(python3 -c "
-import json, sys
+    RESULT=$(REGISTRY="$REGISTRY" python3 - <<'PY' 2>&1 || echo "EXEC_ERROR")
+import json, sys, os
 from collections import Counter
 
+registry_path = os.environ['REGISTRY']
+
 try:
-    with open('$REGISTRY') as f:
+    with open(registry_path) as f:
         reg = json.load(f)
 except (json.JSONDecodeError, FileNotFoundError) as e:
     print(f'PARSE_ERROR:{e}')
@@ -71,10 +73,10 @@ collisions = {did: [n for n, d in ids if d == did] for did, count in id_counts.i
 if collisions:
     print(f'COLLISIONS:{len(collisions)}')
     for did, names in collisions.items():
-        print(f'  domain_id={did}: {\" vs \".join(names)}')
+        print(f'  domain_id={did}: {" vs ".join(names)}')
 else:
     print(f'OK:{len(ids)}')
-" 2>&1 || echo "EXEC_ERROR")
+PY
 
     echo ""
     echo "[T07] === VERDICT ==="

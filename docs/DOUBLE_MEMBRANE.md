@@ -1,5 +1,12 @@
 # SLIME v0 — Double Membrane Pattern (Lifeguard)
 
+> **WARNING: DESIGN DOCUMENT — NOT IMPLEMENTED**
+>
+> This document describes an architectural pattern for future consideration.
+> None of the components described below (SLIME-2, gateway service, effecteur
+> service) exist in the current codebase. Do not attempt to deploy or configure
+> these services.
+
 **Status:** Noncanon (architectural pattern)
 **Authority:** This document does not modify canon. Specs/ remains sole authority for SLIME law.
 

@@ -7,6 +7,8 @@ use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 #[cfg(unix)]
+use std::os::unix::io::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
@@ -31,7 +33,68 @@ fn main() -> std::io::Result<()> {
 }
 
 #[cfg(unix)]
+fn expected_peer_uid() -> u32 {
+    if let Ok(val) = std::env::var("ACTUATOR_EXPECTED_UID") {
+        if let Ok(uid) = val.parse::<u32>() {
+            return uid;
+        }
+        eprintln!(
+            "actuator-min: invalid ACTUATOR_EXPECTED_UID={val:?}, falling back to current uid"
+        );
+    }
+    // Default: accept connections only from the same user running the actuator.
+    ffi::euid()
+}
+
+/// Thin FFI wrappers so we don't need a `libc` crate.
+#[cfg(unix)]
+mod ffi {
+    use std::io;
+    use std::os::unix::io::RawFd;
+
+    // Linux SO_PEERCRED constants
+    const SOL_SOCKET: i32 = 1;
+    const SO_PEERCRED: i32 = 17;
+
+    #[repr(C)]
+    #[derive(Copy, Clone, Default)]
+    pub struct UCred {
+        pub pid: i32,
+        pub uid: u32,
+        pub gid: u32,
+    }
+
+    extern "C" {
+        fn geteuid() -> u32;
+        fn getsockopt(
+            sockfd: i32,
+            level: i32,
+            optname: i32,
+            optval: *mut UCred,
+            optlen: *mut u32,
+        ) -> i32;
+    }
+
+    pub fn euid() -> u32 {
+        unsafe { geteuid() }
+    }
+
+    pub fn peer_uid(fd: RawFd) -> io::Result<u32> {
+        let mut cred = UCred::default();
+        let mut len = std::mem::size_of::<UCred>() as u32;
+        let ret = unsafe { getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &mut cred, &mut len) };
+        if ret == -1 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(cred.uid)
+        }
+    }
+}
+
+#[cfg(unix)]
 fn main() -> std::io::Result<()> {
+    let expected_uid = expected_peer_uid();
+
     ensure_dir(Path::new(RUN_DIR), 0o750)?;
 
     if Path::new(SOCK_PATH).exists() {
@@ -52,6 +115,19 @@ fn main() -> std::io::Result<()> {
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
+                // C-1: peer credential check — only accept connections from expected UID.
+                match ffi::peer_uid(stream.as_raw_fd()) {
+                    Ok(peer_uid) => {
+                        if peer_uid != expected_uid {
+                            eprintln!("actuator-min: rejected connection from uid {peer_uid}");
+                            continue;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("actuator-min: peer_cred failed: {e}");
+                        continue;
+                    }
+                }
                 if let Err(err) = stream.set_read_timeout(Some(READ_TIMEOUT)) {
                     eprintln!("actuator-min: set_read_timeout failed: {err}");
                     continue;
@@ -84,8 +160,9 @@ fn main() -> std::io::Result<()> {
                 }
             }
             Err(err) => {
+                // L-1: handle transient accept errors gracefully instead of terminating.
                 eprintln!("actuator-min: accept error: {err}");
-                return Err(err);
+                continue;
             }
         }
     }
@@ -117,7 +194,7 @@ fn append_event_line(path: &Path, line: &str) -> io::Result<()> {
 }
 
 fn parse_journal_bytes(data: &[u8]) -> io::Result<VecDeque<u128>> {
-    if data.len() % 16 != 0 {
+    if !data.len().is_multiple_of(16) {
         return Err(io::Error::new(
             ErrorKind::InvalidData,
             "replay journal length is not a multiple of 16 bytes",
@@ -181,10 +258,25 @@ impl ReplayJournal {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(path)?;
         set_mode(path, 0o640)?;
 
         file.seek(SeekFrom::Start(0))?;
+
+        // H-6: guard against oversized journal files before reading into memory.
+        // Allow up to 2x the configured capacity so that slightly-overfull
+        // journals (which compact_if_needed will trim) are still accepted,
+        // while truly corrupt/huge files are rejected before allocation.
+        let file_len = file.metadata()?.len();
+        let max_allowed = (max_entries as u64) * 2 * 16;
+        if file_len > max_allowed {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("replay journal too large: {file_len} bytes (max {max_allowed})"),
+            ));
+        }
+
         let mut data = Vec::new();
         file.read_to_end(&mut data)?;
         let order = parse_journal_bytes(&data)?;
@@ -207,6 +299,7 @@ impl ReplayJournal {
         Ok(journal)
     }
 
+    #[must_use = "caller must check whether token was new or replay"]
     fn record_token(&mut self, token: u128) -> io::Result<bool> {
         if self.seen_tokens.contains(&token) {
             return Ok(false);
@@ -388,7 +481,9 @@ mod tests {
 
         {
             let mut reopened = ReplayJournal::open(&path, 4).expect("reopen journal");
-            assert!(!reopened.record_token(42).expect("persisted token should replay-drop"));
+            assert!(!reopened
+                .record_token(42)
+                .expect("persisted token should replay-drop"));
             assert!(reopened.record_token(99).expect("record second token"));
         }
 
@@ -411,7 +506,10 @@ mod tests {
         fs::write(&path, raw).expect("seed journal");
 
         let reopened = ReplayJournal::open(&path, 3).expect("open compacted journal");
-        assert_eq!(reopened.order.iter().copied().collect::<Vec<_>>(), vec![3, 4, 5]);
+        assert_eq!(
+            reopened.order.iter().copied().collect::<Vec<_>>(),
+            vec![3, 4, 5]
+        );
         assert_eq!(fs::metadata(&path).expect("journal metadata").len(), 48);
 
         fs::remove_file(&path).expect("remove journal");
@@ -428,9 +526,14 @@ mod tests {
         assert!(journal.record_token(10).expect("record first token"));
         assert!(journal.record_token(20).expect("record second token"));
         assert!(journal.record_token(30).expect("record third token"));
-        assert_eq!(journal.order.iter().copied().collect::<Vec<_>>(), vec![20, 30]);
+        assert_eq!(
+            journal.order.iter().copied().collect::<Vec<_>>(),
+            vec![20, 30]
+        );
         assert!(!journal.record_token(20).expect("drop existing token"));
-        assert!(journal.record_token(10).expect("oldest evicted token can re-enter"));
+        assert!(journal
+            .record_token(10)
+            .expect("oldest evicted token can re-enter"));
 
         fs::remove_file(&path).expect("remove journal");
         fs::remove_dir_all(parent).expect("remove temp dir");
