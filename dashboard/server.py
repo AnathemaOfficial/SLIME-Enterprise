@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from __future__ import annotations
+
 """
 SLIME Dashboard — Read-Only Observation Server + AI Analyst
 noncanon/enterprise/dashboard — NOT part of the law-layer.
@@ -171,7 +173,12 @@ def _get_analyst_model() -> str:
 
 def _get_analyst_shared_token() -> str:
     """Return the shared analyst token, if configured."""
-    return os.environ.get("ANALYST_SHARED_TOKEN", "").strip()
+    expected = os.environ.get("ANALYST_SHARED_TOKEN", "").strip()
+    if expected and len(expected) < 32:
+        raise RuntimeError(
+            "ANALYST_SHARED_TOKEN must be at least 32 characters"
+        )
+    return expected
 
 
 def _is_localhost_origin(value: str) -> bool:
@@ -299,8 +306,6 @@ def _analyst_available() -> tuple[bool, str]:
             return False, "openai package not installed (required for Kimi)"
         if not os.environ.get("KIMI_API_KEY"):
             return False, "missing KIMI_API_KEY"
-    elif provider == "ollama":
-        pass  # No dependency check — uses urllib (stdlib)
     else:
         return False, f"unknown provider: {provider}"
     return True, "ok"
@@ -464,8 +469,6 @@ def read_log_tail_lines(
     except (FileNotFoundError, PermissionError):
         return []
 
-    return []
-
 
 def read_log():
     """Read a bounded tail of the event log.
@@ -476,7 +479,7 @@ def read_log():
     if not lines:
         return [], 0, {}
 
-    valid = [l for l in lines if extract_hex(l) is not None]
+    valid = [line for line in lines if extract_hex(line) is not None]
     total = len(valid)
 
     # Domain counters from all events
@@ -502,8 +505,13 @@ def read_log():
 # Systemd service status
 # ---------------------------------------------------------------------------
 
+_ALLOWED_SERVICES = frozenset({"slime.service", "actuator.service"})
+
+
 def get_service_status(name: str) -> dict:
     """Query systemd for a service's status."""
+    if name not in _ALLOWED_SERVICES:
+        return {"name": name, "active": "unknown", "pid": "", "since": ""}
     try:
         r = subprocess.run(
             [SYSTEMCTL_BIN, "is-active", name],
@@ -600,7 +608,7 @@ def get_seal_status() -> dict:
     would accept at service start. (Codex adversarial audit fix.)
     """
     try:
-        with open(SEAL_PATH, "r") as f:
+        with open(SEAL_PATH, "r", encoding="ascii") as f:
             content = f.read()
     except (FileNotFoundError, PermissionError):
         return {"present": False}
@@ -659,7 +667,8 @@ def ping_runner() -> dict:
         else:
             return {"reachable": True, "status": "unexpected"}
     except Exception as e:
-        return {"reachable": False, "error": str(e)}
+        logger.warning("ping_runner failed: %s", e)
+        return {"reachable": False, "error": "runner unreachable"}
 
 
 # ---------------------------------------------------------------------------
@@ -692,7 +701,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
             with open(DASHBOARD_HTML, "r") as f:
                 html = f.read()
         except FileNotFoundError:
-            html = "<h1>dashboard.html not found</h1>"
+            self._json_error(500, "dashboard.html not found")
+            return
         self._send(200, "text/html; charset=utf-8", html.encode())
 
     def _serve_events(self):
@@ -745,7 +755,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
             return
 
         # Read and validate body
-        content_length = int(self.headers.get("Content-Length", 0))
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            self._json_error(400, "Invalid Content-Length")
+            return
+        if content_length < 0:
+            self._json_error(400, "Invalid Content-Length")
+            return
         if content_length == 0 or content_length > CHAT_MAX_BODY_BYTES:
             self._json_error(400, "Invalid request body")
             return
@@ -800,7 +817,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             allow_full = os.environ.get(
                 "ANALYST_ALLOW_REMOTE_FULL_CONTEXT", ""
             ).strip() in {"1", "true", "yes"}
-            if not allow_full:
+            if allow_full:
+                logger.warning(
+                    "ANALYST_ALLOW_REMOTE_FULL_CONTEXT=1: shipping full context to remote provider"
+                )
+            else:
                 effective_live_ctx = analyst_context.redact_live_context_for_remote(
                     live_ctx
                 )
@@ -835,6 +856,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if "text/html" in content_type:
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'",
+            )
         self.end_headers()
         self.wfile.write(body)
 
@@ -869,6 +898,10 @@ DashboardHandler.timeout = 30
 # ---------------------------------------------------------------------------
 
 def main():
+    if os.environ.get("SLIME_DASHBOARD_HOST", "127.0.0.1") != "127.0.0.1":
+        raise RuntimeError(
+            "Non-localhost binding requires all routes to be token-gated. Refusing."
+        )
     server = ThreadedHTTPServer((HOST, PORT), DashboardHandler)
     print(f"[slime-dashboard] listening on http://{HOST}:{PORT}")
     print(f"[slime-dashboard] event log: {LOG_PATH}")

@@ -21,7 +21,7 @@
 ## Logging side effects
 
 - `stderr` logging may fail without affecting actuator semantics.
-- File logging is best-effort append-only; open/write failure does not change actuator decision path.
+- File logging is append-only. Open/write failure terminates the actuator — the event log is the only observable output, so the fail-closed posture ensures no silent audit gaps.
 
 ## Third-state avoidance
 

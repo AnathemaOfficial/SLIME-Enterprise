@@ -1,3 +1,10 @@
-actuator-min/target/
 __pycache__/
+*.pyc
+*.pyo
 *.py[cod]
+target/
+actuator-min/target/
+*.swp
+*.swo
+.env
+.env.bak.*

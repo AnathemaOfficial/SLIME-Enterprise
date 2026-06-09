@@ -38,13 +38,19 @@ test -f "$SEAL_FILE"
 [ "$(stat -c '%a' "$SEAL_DIR")" = "750" ]
 [ "$(stat -c '%a' "$SEAL_FILE")" = "440" ]
 
-env \
-  SEAL_FILE="$SEAL_FILE" \
-  ACTUATOR_BIN="$ACTUATOR_BIN" \
-  RUNNER_BIN="$RUNNER_BIN" \
-  SOCK_DIR="$SOCK_DIR" \
-  EXPECTED_SOCK_PERMS="$EXPECTED_SOCK_PERMS" \
-  "$GUARD_SCRIPT"
+# Create a test-specific guard with substituted paths
+# The guard script unsets env vars (MED-02 hardening), making the
+# env-override approach ineffective. Use sed to patch paths instead.
+GUARD_TEST="$TMP_DIR/fireplank-guard-boot-test.sh"
+sed \
+    -e "s|/usr/lib/slime/fireplank.seal|$SEAL_FILE|g" \
+    -e "s|/usr/local/bin/actuator-min|$ACTUATOR_BIN|g" \
+    -e "s|/usr/local/bin/slime-runner|$RUNNER_BIN|g" \
+    -e "s|/run/slime|$SOCK_DIR|g" \
+    "$GUARD_SCRIPT" > "$GUARD_TEST"
+chmod +x "$GUARD_TEST"
+
+"$GUARD_TEST"
 
 MALICIOUS_MARKER="$TMP_DIR/owned"
 chmod 640 "$SEAL_FILE"
@@ -54,13 +60,7 @@ RUNNER_BIN_HASH=$(sha256sum "$RUNNER_BIN" | cut -d' ' -f1)
 EVIL=\$(touch "$MALICIOUS_MARKER")
 EOF
 
-if env \
-  SEAL_FILE="$SEAL_FILE" \
-  ACTUATOR_BIN="$ACTUATOR_BIN" \
-  RUNNER_BIN="$RUNNER_BIN" \
-  SOCK_DIR="$SOCK_DIR" \
-  EXPECTED_SOCK_PERMS="$EXPECTED_SOCK_PERMS" \
-  "$GUARD_SCRIPT"; then
+if "$GUARD_TEST"; then
     echo "guard accepted malicious seal unexpectedly" >&2
     exit 1
 fi

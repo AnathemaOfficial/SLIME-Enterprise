@@ -20,6 +20,7 @@ Restart=no
 NoNewPrivileges=yes
 StandardOutput=append:/var/log/slime-actuator/events.log
 StandardError=append:/var/log/slime-actuator/events.log
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target

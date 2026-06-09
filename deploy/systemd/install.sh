@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [ "$(id -u)" -ne 0 ]; then
+    echo "ERROR: this script must be run as root (or via sudo)" >&2
+    exit 1
+fi
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$ROOT_DIR/systemd"
 DEPLOY_DIR="$(cd "$ROOT_DIR/.." && pwd)"

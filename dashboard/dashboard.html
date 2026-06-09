@@ -378,10 +378,14 @@
 
     function renderSeal(seal) {
         const badge = document.getElementById('seal-badge');
-        if (seal.present) {
+        if (seal.present && seal.verified) {
             badge.className = 'seal-badge seal-ok';
             badge.textContent = 'FP-1: OK';
             badge.title = 'Runner: ' + seal.runner_hash + '\nActuator: ' + seal.actuator_hash;
+        } else if (seal.present && !seal.verified) {
+            badge.className = 'seal-badge seal-fail';
+            badge.textContent = 'FP-1: INVALID';
+            badge.title = 'Parse error: ' + (seal.parse_error || 'unknown');
         } else {
             badge.className = 'seal-badge seal-fail';
             badge.textContent = 'FP-1: MISSING';

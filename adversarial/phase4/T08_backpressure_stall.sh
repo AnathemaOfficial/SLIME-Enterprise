@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+_actuator_stopped=false
+cleanup() {
+    if [ "$_actuator_stopped" = true ]; then
+        echo "[T08] CLEANUP: restarting actuator" >&2
+        sudo systemctl start actuator.service 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT INT TERM
+
 # =============================================================================
 # T08 — Backpressure / Egress Stall
 #
@@ -87,6 +97,7 @@ if ! sudo systemctl stop "$ACTUATOR_SERVICE" 2>/dev/null; then
     echo "[T08] Manual test: kill actuator process, flood SLIME, restart, check drain."
     exit 0
 fi
+_actuator_stopped=true
 
 sleep 1
 
@@ -149,6 +160,7 @@ echo "[T08] Restarting $ACTUATOR_SERVICE ..."
 if ! sudo systemctl start "$ACTUATOR_SERVICE" 2>/dev/null; then
     echo "[T08] WARN — could not restart $ACTUATOR_SERVICE"
 fi
+_actuator_stopped=false
 
 sleep 3
 

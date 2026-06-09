@@ -252,7 +252,7 @@ class HandlerTests(unittest.TestCase):
 
     def test_analyst_info_reports_unavailable_provider(self):
         with mock.patch.object(server, "_analyst_available", return_value=(False, "missing key")), \
-             mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True):
+             mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "test-token-that-is-32-chars-long"}, clear=True):
             status, body = request_json("GET", "/api/analyst/info")
 
         self.assertEqual(status, 200)
@@ -270,7 +270,7 @@ class HandlerTests(unittest.TestCase):
         self.assertIn("auth not configured", body["error"])
 
     def test_analyst_post_rejects_missing_token(self):
-        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True):
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "test-token-that-is-32-chars-long"}, clear=True):
             status, body = request_json("POST", "/api/analyst", {"message": "hello"})
 
         self.assertEqual(status, 403)
@@ -278,13 +278,13 @@ class HandlerTests(unittest.TestCase):
 
     # Kimi audit finding M-3: CSRF / cross-origin rejection.
     def test_analyst_post_rejects_missing_origin_and_referer(self):
-        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True):
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "test-token-that-is-32-chars-long"}, clear=True):
             status, body = request_json(
                 "POST",
                 "/api/analyst",
                 {"message": "hello"},
                 headers={
-                    server.ANALYST_AUTH_HEADER: "secret",
+                    server.ANALYST_AUTH_HEADER: "test-token-that-is-32-chars-long",
                     "__omit_origin__": True,
                 },
             )
@@ -293,13 +293,13 @@ class HandlerTests(unittest.TestCase):
         self.assertIn("Origin/Referer", body["error"])
 
     def test_analyst_post_rejects_cross_origin(self):
-        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True):
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "test-token-that-is-32-chars-long"}, clear=True):
             status, body = request_json(
                 "POST",
                 "/api/analyst",
                 {"message": "hello"},
                 headers={
-                    server.ANALYST_AUTH_HEADER: "secret",
+                    server.ANALYST_AUTH_HEADER: "test-token-that-is-32-chars-long",
                     "Origin": "http://attacker.example/",
                 },
             )
@@ -308,7 +308,7 @@ class HandlerTests(unittest.TestCase):
         self.assertIn("Cross-origin", body["error"])
 
     def test_analyst_post_rejects_invalid_token(self):
-        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True):
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "test-token-that-is-32-chars-long"}, clear=True):
             status, body = request_json(
                 "POST",
                 "/api/analyst",
@@ -320,27 +320,27 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(body["error"], "Invalid analyst token")
 
     def test_analyst_post_rejects_rate_limited_requests(self):
-        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True), \
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "test-token-that-is-32-chars-long"}, clear=True), \
              mock.patch.object(server, "_check_rate_limit", return_value=False):
             status, body = request_json(
                 "POST",
                 "/api/analyst",
                 {"message": "hello"},
-                headers={server.ANALYST_AUTH_HEADER: "secret"},
+                headers={server.ANALYST_AUTH_HEADER: "test-token-that-is-32-chars-long"},
             )
 
         self.assertEqual(status, 429)
         self.assertIn("Rate limited", body["error"])
 
     def test_analyst_post_rejects_when_provider_unavailable(self):
-        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True), \
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "test-token-that-is-32-chars-long"}, clear=True), \
              mock.patch.object(server, "_check_rate_limit", return_value=True), \
              mock.patch.object(server, "_analyst_available", return_value=(False, "missing key")):
             status, body = request_json(
                 "POST",
                 "/api/analyst",
                 {"message": "hello"},
-                headers={server.ANALYST_AUTH_HEADER: "secret"},
+                headers={server.ANALYST_AUTH_HEADER: "test-token-that-is-32-chars-long"},
             )
 
         self.assertEqual(status, 503)
@@ -348,7 +348,7 @@ class HandlerTests(unittest.TestCase):
 
     def test_analyst_post_rejects_invalid_json(self):
         with running_server() as port, \
-             mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True), \
+             mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "test-token-that-is-32-chars-long"}, clear=True), \
              mock.patch.object(server, "_check_rate_limit", return_value=True), \
              mock.patch.object(server, "_analyst_available", return_value=(True, "ok")):
             conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
@@ -359,7 +359,7 @@ class HandlerTests(unittest.TestCase):
                 headers={
                     "Content-Type": "application/json",
                     "Connection": "close",
-                    server.ANALYST_AUTH_HEADER: "secret",
+                    server.ANALYST_AUTH_HEADER: "test-token-that-is-32-chars-long",
                     # Kimi audit M-3: pass a first-party Origin so the
                     # cross-origin guard in _authorize_analyst_request
                     # does not 403 before the JSON parser runs.
@@ -374,21 +374,21 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(body["error"], "Invalid JSON")
 
     def test_analyst_post_rejects_empty_message(self):
-        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True), \
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "test-token-that-is-32-chars-long"}, clear=True), \
              mock.patch.object(server, "_check_rate_limit", return_value=True), \
              mock.patch.object(server, "_analyst_available", return_value=(True, "ok")):
             status, body = request_json(
                 "POST",
                 "/api/analyst",
                 {"message": "   "},
-                headers={server.ANALYST_AUTH_HEADER: "secret"},
+                headers={server.ANALYST_AUTH_HEADER: "test-token-that-is-32-chars-long"},
             )
 
         self.assertEqual(status, 400)
         self.assertEqual(body["error"], "Empty message")
 
     def test_analyst_post_returns_502_when_llm_call_fails(self):
-        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True), \
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "test-token-that-is-32-chars-long"}, clear=True), \
              mock.patch.object(server, "_check_rate_limit", return_value=True), \
              mock.patch.object(server, "_analyst_available", return_value=(True, "ok")), \
              mock.patch.object(server.analyst_context, "build_static_context", return_value="static"), \
@@ -398,14 +398,14 @@ class HandlerTests(unittest.TestCase):
                 "POST",
                 "/api/analyst",
                 {"message": "hello"},
-                headers={server.ANALYST_AUTH_HEADER: "secret"},
+                headers={server.ANALYST_AUTH_HEADER: "test-token-that-is-32-chars-long"},
             )
 
         self.assertEqual(status, 502)
         self.assertEqual(body["error"], "AI Analyst temporarily unavailable")
 
     def test_analyst_post_returns_response_on_success(self):
-        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "secret"}, clear=True), \
+        with mock.patch.dict(server.os.environ, {"ANALYST_SHARED_TOKEN": "test-token-that-is-32-chars-long"}, clear=True), \
              mock.patch.object(server, "_check_rate_limit", return_value=True), \
              mock.patch.object(server, "_analyst_available", return_value=(True, "ok")), \
              mock.patch.object(server.analyst_context, "build_static_context", return_value="static"), \
@@ -415,7 +415,7 @@ class HandlerTests(unittest.TestCase):
                 "POST",
                 "/api/analyst",
                 {"message": "hello"},
-                headers={server.ANALYST_AUTH_HEADER: "secret"},
+                headers={server.ANALYST_AUTH_HEADER: "test-token-that-is-32-chars-long"},
             )
 
         self.assertEqual(status, 200)

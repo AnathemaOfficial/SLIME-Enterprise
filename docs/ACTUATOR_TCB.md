@@ -3,6 +3,14 @@
 **Status:** Noncanon (enterprise integration guidance)
 **Authority:** This document does not modify canon. Specs/ remains sole authority for SLIME law.
 
+> **WARNING: KNOWN LIMITATION: Seal does not cover verification scripts**
+>
+> The FP-1 seal hashes only `actuator-min` and `slime-runner`. The guard
+> script (`fireplank-guard-boot.sh`) and seal generator (`generate-seal.sh`)
+> are NOT included in the seal. An attacker with root access can replace these
+> scripts to bypass the entire integrity chain. A signed-artifact model (GPG
+> or sigstore) is recommended before any production deployment.
+
 ---
 
 ## Problem Statement
